@@ -1,0 +1,142 @@
+from pathlib import Path
+
+import typer
+from rich.console import Console
+from rich.table import Table
+
+from kado_transcriber.audio import discover_media_files
+from kado_transcriber.config import Settings, get_settings
+from kado_transcriber.cuda_check import check_cuda
+from kado_transcriber.exporters import export_all, format_timestamp
+from kado_transcriber.hashing import file_sha256
+from kado_transcriber.skip import should_skip_existing
+from kado_transcriber.transcriber import FasterWhisperTranscriber
+
+app = typer.Typer(help="CUDA-first Spanish interview transcription for KADO.")
+console = Console()
+
+
+@app.command("inspect-config")
+def inspect_config() -> None:
+    settings = get_settings()
+    table = Table(title="KADO Transcriber Settings")
+    table.add_column("Setting")
+    table.add_column("Value")
+    for key, value in settings.model_dump().items():
+        if key == "hf_token" and value:
+            value = "***"
+        table.add_row(key, str(value))
+    console.print(table)
+
+
+@app.command("check-cuda")
+def check_cuda_command() -> None:
+    settings = get_settings()
+    console.print(f"Configured device: {settings.whisper_device}")
+    console.print(f"Configured compute type: {settings.whisper_compute_type}")
+    result = check_cuda()
+
+    if result.nvidia_smi_found:
+        console.print("[green]nvidia-smi is available.[/green]")
+    else:
+        console.print("[red]nvidia-smi is not available or failed.[/red]")
+
+    if result.faster_whisper_cuda_ok:
+        console.print("[green]faster-whisper loaded a tiny CUDA model successfully.[/green]")
+    else:
+        console.print("[red]faster-whisper CUDA check failed.[/red]")
+        if result.error:
+            console.print(result.error)
+        raise typer.Exit(code=1)
+
+
+@app.command("transcribe-file")
+def transcribe_file(
+    audio_path: Path = typer.Argument(..., exists=True, file_okay=True, dir_okay=False),
+    output_dir: Path | None = typer.Option(None, "--output-dir", "-o"),
+) -> None:
+    settings = get_settings()
+    output_root = output_dir or settings.transcripts_output_dir
+    output_root.mkdir(parents=True, exist_ok=True)
+    _transcribe_files([audio_path], output_root, settings)
+
+
+@app.command("transcribe-batch")
+def transcribe_batch(
+    input_dir: Path | None = typer.Option(None, "--input-dir", "-i"),
+    output_dir: Path | None = typer.Option(None, "--output-dir", "-o"),
+) -> None:
+    settings = get_settings()
+    source_dir = input_dir or settings.input_audio_dir
+    output_root = output_dir or settings.transcripts_output_dir
+
+    files = discover_media_files(source_dir)
+    if not files:
+        raise typer.BadParameter(f"No supported media files found in {source_dir}")
+
+    output_root.mkdir(parents=True, exist_ok=True)
+    _transcribe_files(files, output_root, settings)
+
+
+def main() -> None:
+    app()
+
+
+def _transcribe_files(files: list[Path], output_root: Path, settings: Settings) -> None:
+    table = Table(title="Transcription Summary")
+    table.add_column("File")
+    table.add_column("Status")
+    table.add_column("Output")
+    table.add_column("Duration")
+    table.add_column("Segments")
+    table.add_column("Model")
+    table.add_column("Device")
+    table.add_column("Compute")
+    table.add_column("Batch")
+
+    transcriber: FasterWhisperTranscriber | None = None
+
+    for media_file in files:
+        source_sha256 = file_sha256(media_file)
+        file_output_dir = output_root / media_file.stem
+
+        if should_skip_existing(file_output_dir, source_sha256, settings):
+            table.add_row(
+                media_file.name,
+                "skipped",
+                str(file_output_dir),
+                "-",
+                "-",
+                settings.whisper_model_name,
+                settings.whisper_device,
+                settings.whisper_compute_type,
+                str(settings.whisper_batch_size),
+            )
+            continue
+
+        if transcriber is None:
+            transcriber = FasterWhisperTranscriber(settings)
+
+        result = transcriber.transcribe_file(
+            media_file,
+            source_sha256=source_sha256,
+            source_file=media_file,
+        )
+        export_all(result, file_output_dir, settings)
+        table.add_row(
+            media_file.name,
+            "transcribed",
+            str(file_output_dir),
+            format_timestamp(result.duration),
+            str(len(result.segments)),
+            result.model_name,
+            result.device,
+            result.compute_type,
+            str(result.batch_size),
+        )
+
+    console.print(table)
+
+
+if __name__ == "__main__":
+    main()

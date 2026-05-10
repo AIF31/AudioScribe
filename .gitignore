@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+build/
+dist/
+.env
+.codex
+data/audio_raw/**
+data/transcripts/**
+!data/audio_raw/.gitkeep
+!data/transcripts/.gitkeep
