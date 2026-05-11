@@ -95,6 +95,7 @@ def test_create_transcriber_selects_openai_whisper_backend(monkeypatch):
     settings = Settings(
         transcription_backend="openai-whisper",
         openai_api_key="sk_test_key",
+        whisper_language="en",
     )
 
     transcriber = create_transcriber(settings)
@@ -102,12 +103,13 @@ def test_create_transcriber_selects_openai_whisper_backend(monkeypatch):
     assert isinstance(transcriber, OpenAIWhisperTranscriber)
 
 
-def test_openai_whisper_transcriber_uses_audio_api(monkeypatch, tmp_path):
-    calls = []
+def test_openai_whisper_transcriber_uses_transcriptions_api(monkeypatch, tmp_path):
+    transcription_calls = []
+    translation_calls = []
 
     class _FakeTranscriptions:
         def create(self, **kwargs):
-            calls.append(kwargs)
+            transcription_calls.append(kwargs)
             return SimpleNamespace(
                 model_dump=lambda: {
                     "text": "Hola mundo",
@@ -120,10 +122,18 @@ def test_openai_whisper_transcriber_uses_audio_api(monkeypatch, tmp_path):
                 }
             )
 
+    class _FakeTranslations:
+        def create(self, **kwargs):
+            translation_calls.append(kwargs)
+            raise AssertionError("translations endpoint should not be called")
+
     class _FakeOpenAI:
         def __init__(self, api_key):
             self.api_key = api_key
-            self.audio = SimpleNamespace(transcriptions=_FakeTranscriptions())
+            self.audio = SimpleNamespace(
+                transcriptions=_FakeTranscriptions(),
+                translations=_FakeTranslations(),
+            )
 
     monkeypatch.setitem(sys.modules, "openai", SimpleNamespace(OpenAI=_FakeOpenAI))
 
@@ -132,15 +142,65 @@ def test_openai_whisper_transcriber_uses_audio_api(monkeypatch, tmp_path):
     settings = Settings(
         transcription_backend="openai-whisper",
         openai_api_key="sk_test_key",
+        whisper_language="en",
     )
     result = OpenAIWhisperTranscriber(settings).transcribe_file(audio_path)
 
-    assert calls[0]["model"] == "whisper-1"
-    assert calls[0]["response_format"] == "verbose_json"
+    assert transcription_calls[0]["model"] == "whisper-1"
+    assert transcription_calls[0]["response_format"] == "verbose_json"
+    assert transcription_calls[0]["language"] == "en"
+    assert translation_calls == []
     assert result.transcription_backend == "openai-whisper"
     assert result.model_name == "whisper-1"
     assert result.full_text == "Hola mundo"
     assert len(result.segments) == 2
+
+
+def test_openai_whisper_transcriber_uses_translations_api_for_translate(monkeypatch, tmp_path):
+    transcription_calls = []
+    translation_calls = []
+
+    class _FakeTranscriptions:
+        def create(self, **kwargs):
+            transcription_calls.append(kwargs)
+            raise AssertionError("transcriptions endpoint should not be called")
+
+    class _FakeTranslations:
+        def create(self, **kwargs):
+            translation_calls.append(kwargs)
+            return SimpleNamespace(
+                model_dump=lambda: {
+                    "text": "Hello world",
+                    "duration": 2.0,
+                }
+            )
+
+    class _FakeOpenAI:
+        def __init__(self, api_key):
+            self.api_key = api_key
+            self.audio = SimpleNamespace(
+                transcriptions=_FakeTranscriptions(),
+                translations=_FakeTranslations(),
+            )
+
+    monkeypatch.setitem(sys.modules, "openai", SimpleNamespace(OpenAI=_FakeOpenAI))
+
+    audio_path = tmp_path / "sample.mp3"
+    audio_path.write_bytes(b"audio")
+    settings = Settings(
+        transcription_backend="openai-whisper",
+        openai_api_key="sk_test_key",
+        whisper_language="es",
+        whisper_task="translate",
+    )
+    result = OpenAIWhisperTranscriber(settings).transcribe_file(audio_path)
+
+    assert transcription_calls == []
+    assert translation_calls[0]["model"] == "whisper-1"
+    assert translation_calls[0]["response_format"] == "verbose_json"
+    assert "language" not in translation_calls[0]
+    assert result.full_text == "Hello world"
+    assert result.segments[0].text == "Hello world"
 
 
 def test_openai_realtime_transcriber_sends_session_and_audio(monkeypatch, tmp_path):
@@ -186,13 +246,31 @@ def test_openai_realtime_transcriber_sends_session_and_audio(monkeypatch, tmp_pa
     settings = Settings(
         transcription_backend="openai-realtime-whisper",
         openai_api_key="sk_test_key",
+        whisper_language="en",
     )
     result = OpenAIRealtimeWhisperTranscriber(settings).transcribe_file(
         tmp_path / "sample.mp3"
     )
 
     assert sent_events[0]["type"] == "session.update"
-    assert sent_events[0]["input_audio_transcription"]["model"] == "gpt-realtime-whisper"
+    assert sent_events[0]["session"]["type"] == "transcription"
+    audio_input = sent_events[0]["session"]["audio"]["input"]
+    assert audio_input["format"] == {"type": "audio/pcm", "rate": 24000}
+    assert audio_input["transcription"] == {
+        "model": "gpt-realtime-whisper",
+        "language": "en",
+    }
+    assert audio_input["turn_detection"] == {
+        "type": "server_vad",
+        "threshold": 0.5,
+        "prefix_padding_ms": 300,
+        "silence_duration_ms": 500,
+    }
+    assert audio_input["noise_reduction"] == {"type": "near_field"}
+    assert "input_audio_format" not in sent_events[0]
+    assert "input_audio_transcription" not in sent_events[0]
+    assert "turn_detection" not in sent_events[0]
+    assert "input_audio_noise_reduction" not in sent_events[0]
     assert sent_events[1]["type"] == "input_audio_buffer.append"
     assert sent_events[2]["type"] == "input_audio_buffer.commit"
     assert result.transcription_backend == "openai-realtime-whisper"

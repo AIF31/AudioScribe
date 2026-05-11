@@ -134,3 +134,30 @@ def test_should_not_skip_between_faster_whisper_and_openai_whisper(tmp_path):
     )
 
     assert should_skip_existing(tmp_path, "hash", openai_settings) is False
+
+
+def test_should_not_skip_openai_whisper_when_task_changes(tmp_path):
+    transcribe_settings = Settings(
+        transcription_backend="openai-whisper",
+        openai_api_key="sk_test_key",
+        whisper_task="transcribe",
+    )
+    result = TranscriptResult(
+        source_file="sample.mp3",
+        source_sha256="hash",
+        transcription_backend="openai-whisper",
+        language=transcribe_settings.whisper_language,
+        model_name=transcribe_settings.openai_whisper_model,
+        device="openai",
+        compute_type="api",
+        batch_size=1,
+        segments=[],
+        full_text="",
+    )
+    export_all(result, tmp_path, transcribe_settings)
+
+    translate_settings = transcribe_settings.model_copy(
+        update={"whisper_task": "translate"}
+    )
+
+    assert should_skip_existing(tmp_path, "hash", translate_settings) is False

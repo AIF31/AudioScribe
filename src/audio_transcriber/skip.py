@@ -69,6 +69,7 @@ def _openai_whisper_metadata_matches_settings(metadata: dict, settings: Settings
         "transcription_backend": settings.transcription_backend,
         "model_name": settings.openai_whisper_model,
         "language": settings.whisper_language,
+        "task": settings.whisper_task,
         "initial_prompt_used": bool(settings.whisper_initial_prompt),
         "openai_whisper_model": settings.openai_whisper_model,
     }

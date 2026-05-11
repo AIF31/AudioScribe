@@ -52,7 +52,7 @@ WHISPER_COMPUTE_TYPE=float16
 HF_TOKEN=hf_your_token_here
 ```
 
-OpenAI cloud file transcription uses the OpenAI Audio Transcriptions API:
+OpenAI cloud file mode uses the OpenAI Audio API:
 
 ```env
 TRANSCRIPTION_BACKEND=openai-whisper
@@ -73,7 +73,7 @@ OPENAI_REALTIME_NOISE_REDUCTION=near_field
 OPENAI_REALTIME_TIMEOUT_SECONDS=120
 ```
 
-The `openai-whisper` backend uploads the media file to the OpenAI Audio Transcriptions API. The `openai-realtime-whisper` backend decodes existing media files locally, resamples them to 24 kHz mono PCM, and streams the audio to a server-to-server Realtime transcription session.
+The `openai-whisper` backend uploads the media file to the OpenAI Audio API, using the transcriptions endpoint when `WHISPER_TASK=transcribe` and the translations endpoint when `WHISPER_TASK=translate`. The `openai-realtime-whisper` backend decodes existing media files locally, resamples them to 24 kHz mono PCM, and streams the audio to a server-to-server Realtime transcription session.
 
 ## Commands
 

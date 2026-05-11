@@ -148,17 +148,29 @@ class OpenAIWhisperTranscriber:
     ) -> TranscriptResult:
         from openai import OpenAI
 
+        task = self.settings.whisper_task.strip().lower()
+        if task not in {"transcribe", "translate"}:
+            raise ValueError(
+                "WHISPER_TASK must be 'transcribe' or 'translate' when using openai-whisper"
+            )
+
         client = OpenAI(api_key=self.settings.openai_api_key)
         kwargs = {
             "model": self.settings.openai_whisper_model,
             "response_format": "verbose_json",
-            "language": self.settings.whisper_language,
         }
+        if task == "transcribe":
+            kwargs["language"] = self.settings.whisper_language
         if self.settings.whisper_initial_prompt:
             kwargs["prompt"] = self.settings.whisper_initial_prompt
 
         with audio_path.open("rb") as audio_file:
-            transcription = client.audio.transcriptions.create(
+            audio_endpoint = (
+                client.audio.translations
+                if task == "translate"
+                else client.audio.transcriptions
+            )
+            transcription = audio_endpoint.create(
                 file=audio_file,
                 **kwargs,
             )
@@ -287,24 +299,36 @@ class OpenAIRealtimeWhisperTranscriber:
             if self.settings.openai_realtime_noise_reduction.lower() in {"none", "null", "false"}
             else {"type": self.settings.openai_realtime_noise_reduction}
         )
-        return {
-            "type": "session.update",
-            "session": {"type": "transcription"},
-            "input_audio_format": "pcm16",
-            "input_audio_transcription": {
-                "model": self.settings.openai_realtime_model,
-                "language": self.settings.whisper_language,
-            },
-            "turn_detection": {
+        turn_detection = (
+            None
+            if self.settings.openai_realtime_turn_detection.lower()
+            in {"none", "null", "false"}
+            else {
                 "type": self.settings.openai_realtime_turn_detection,
                 "threshold": 0.5,
                 "prefix_padding_ms": 300,
                 "silence_duration_ms": self.settings.whisper_min_silence_duration_ms,
             }
-            if self.settings.openai_realtime_turn_detection.lower()
-            not in {"none", "null", "false"}
-            else None,
-            "input_audio_noise_reduction": noise_reduction,
+        )
+        return {
+            "type": "session.update",
+            "session": {
+                "type": "transcription",
+                "audio": {
+                    "input": {
+                        "format": {
+                            "type": "audio/pcm",
+                            "rate": self.settings.openai_realtime_audio_rate,
+                        },
+                        "transcription": {
+                            "model": self.settings.openai_realtime_model,
+                            "language": self.settings.whisper_language,
+                        },
+                        "turn_detection": turn_detection,
+                        "noise_reduction": noise_reduction,
+                    }
+                },
+            },
             "include": ["item.input_audio_transcription.logprobs"],
         }
 
