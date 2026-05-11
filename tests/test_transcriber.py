@@ -1,8 +1,14 @@
 from types import SimpleNamespace
 import sys
+import json
 
 from kado_transcriber.config import Settings
-from kado_transcriber.transcriber import FasterWhisperTranscriber
+from kado_transcriber.transcriber import (
+    FasterWhisperTranscriber,
+    OpenAIRealtimeWhisperTranscriber,
+    OpenAIWhisperTranscriber,
+    create_transcriber,
+)
 
 
 class _FakeSegment:
@@ -72,3 +78,123 @@ def test_transcriber_keeps_cuda_error_when_fallback_disabled(monkeypatch):
         assert "Failed to load faster-whisper CUDA model" in str(exc)
     else:
         raise AssertionError("Expected CUDA initialization failure")
+
+
+def test_create_transcriber_selects_openai_realtime_backend(monkeypatch):
+    settings = Settings(
+        transcription_backend="openai-realtime-whisper",
+        openai_api_key="sk_test_key",
+    )
+
+    transcriber = create_transcriber(settings)
+
+    assert isinstance(transcriber, OpenAIRealtimeWhisperTranscriber)
+
+
+def test_create_transcriber_selects_openai_whisper_backend(monkeypatch):
+    settings = Settings(
+        transcription_backend="openai-whisper",
+        openai_api_key="sk_test_key",
+    )
+
+    transcriber = create_transcriber(settings)
+
+    assert isinstance(transcriber, OpenAIWhisperTranscriber)
+
+
+def test_openai_whisper_transcriber_uses_audio_api(monkeypatch, tmp_path):
+    calls = []
+
+    class _FakeTranscriptions:
+        def create(self, **kwargs):
+            calls.append(kwargs)
+            return SimpleNamespace(
+                model_dump=lambda: {
+                    "text": "Hola mundo",
+                    "language": "spanish",
+                    "duration": 2.0,
+                    "segments": [
+                        {"start": 0.0, "end": 1.0, "text": "Hola"},
+                        {"start": 1.0, "end": 2.0, "text": "mundo"},
+                    ],
+                }
+            )
+
+    class _FakeOpenAI:
+        def __init__(self, api_key):
+            self.api_key = api_key
+            self.audio = SimpleNamespace(transcriptions=_FakeTranscriptions())
+
+    monkeypatch.setitem(sys.modules, "openai", SimpleNamespace(OpenAI=_FakeOpenAI))
+
+    audio_path = tmp_path / "sample.mp3"
+    audio_path.write_bytes(b"audio")
+    settings = Settings(
+        transcription_backend="openai-whisper",
+        openai_api_key="sk_test_key",
+    )
+    result = OpenAIWhisperTranscriber(settings).transcribe_file(audio_path)
+
+    assert calls[0]["model"] == "whisper-1"
+    assert calls[0]["response_format"] == "verbose_json"
+    assert result.transcription_backend == "openai-whisper"
+    assert result.model_name == "whisper-1"
+    assert result.full_text == "Hola mundo"
+    assert len(result.segments) == 2
+
+
+def test_openai_realtime_transcriber_sends_session_and_audio(monkeypatch, tmp_path):
+    sent_events = []
+
+    class WebSocketTimeoutException(Exception):
+        pass
+
+    class _FakeWebSocket:
+        def __init__(self):
+            self.recv_count = 0
+
+        def send(self, payload):
+            sent_events.append(json.loads(payload))
+
+        def settimeout(self, _timeout):
+            pass
+
+        def recv(self):
+            self.recv_count += 1
+            if self.recv_count == 1:
+                return json.dumps(
+                    {
+                        "type": "conversation.item.input_audio_transcription.completed",
+                        "transcript": "Hola mundo",
+                    }
+                )
+            raise WebSocketTimeoutException()
+
+        def close(self):
+            pass
+
+    fake_websocket_module = SimpleNamespace(
+        WebSocketTimeoutException=WebSocketTimeoutException,
+        create_connection=lambda *_args, **_kwargs: _FakeWebSocket()
+    )
+    monkeypatch.setitem(sys.modules, "websocket", fake_websocket_module)
+    monkeypatch.setattr(
+        "kado_transcriber.transcriber._decode_audio_pcm_chunks",
+        lambda *_args, **_kwargs: [b"pcm-bytes"],
+    )
+
+    settings = Settings(
+        transcription_backend="openai-realtime-whisper",
+        openai_api_key="sk_test_key",
+    )
+    result = OpenAIRealtimeWhisperTranscriber(settings).transcribe_file(
+        tmp_path / "sample.mp3"
+    )
+
+    assert sent_events[0]["type"] == "session.update"
+    assert sent_events[0]["input_audio_transcription"]["model"] == "gpt-realtime-whisper"
+    assert sent_events[1]["type"] == "input_audio_buffer.append"
+    assert sent_events[2]["type"] == "input_audio_buffer.commit"
+    assert result.transcription_backend == "openai-realtime-whisper"
+    assert result.model_name == "gpt-realtime-whisper"
+    assert result.full_text == "Hola mundo"

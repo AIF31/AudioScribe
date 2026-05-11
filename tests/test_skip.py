@@ -90,3 +90,47 @@ def test_should_skip_when_cuda_config_previously_fell_back_to_cpu(tmp_path):
     export_all(result, tmp_path, settings)
 
     assert should_skip_existing(tmp_path, "hash", settings) is True
+
+
+def test_should_not_skip_between_faster_whisper_and_openai_realtime(tmp_path):
+    faster_settings = Settings()
+    result = TranscriptResult(
+        source_file="interview.mp3",
+        source_sha256="hash",
+        model_name=faster_settings.whisper_model_name,
+        device=faster_settings.whisper_device,
+        compute_type=faster_settings.whisper_compute_type,
+        batch_size=faster_settings.whisper_batch_size,
+        segments=[],
+        full_text="",
+    )
+    export_all(result, tmp_path, faster_settings)
+
+    openai_settings = Settings(
+        transcription_backend="openai-realtime-whisper",
+        openai_api_key="sk_test_key",
+    )
+
+    assert should_skip_existing(tmp_path, "hash", openai_settings) is False
+
+
+def test_should_not_skip_between_faster_whisper_and_openai_whisper(tmp_path):
+    faster_settings = Settings()
+    result = TranscriptResult(
+        source_file="interview.mp3",
+        source_sha256="hash",
+        model_name=faster_settings.whisper_model_name,
+        device=faster_settings.whisper_device,
+        compute_type=faster_settings.whisper_compute_type,
+        batch_size=faster_settings.whisper_batch_size,
+        segments=[],
+        full_text="",
+    )
+    export_all(result, tmp_path, faster_settings)
+
+    openai_settings = Settings(
+        transcription_backend="openai-whisper",
+        openai_api_key="sk_test_key",
+    )
+
+    assert should_skip_existing(tmp_path, "hash", openai_settings) is False

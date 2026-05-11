@@ -43,6 +43,7 @@ def test_export_md(tmp_path):
 
     assert output.name == "interview_001_transcript.md"
     assert "# Transcript: interview_001" in text
+    assert "- Backend: faster-whisper" in text
     assert "[00:00:00 - 00:00:04]" in text
     assert "Hola." in text
     assert "- Device: cuda" in text
@@ -54,6 +55,7 @@ def test_export_metadata(tmp_path):
 
     assert output.name == "interview_001_metadata.json"
     assert metadata["source_sha256"] == "abc123"
+    assert metadata["transcription_backend"] == "faster-whisper"
     assert metadata["model_name"] == "large-v3"
     assert metadata["device"] == "cuda"
     assert metadata["compute_type"] == "float16"
@@ -61,6 +63,8 @@ def test_export_metadata(tmp_path):
     assert metadata["requested_device"] == "cuda"
     assert metadata["requested_compute_type"] == "float16"
     assert metadata["requested_batch_size"] == 8
+    assert metadata["openai_whisper_model"] == "whisper-1"
+    assert metadata["openai_realtime_model"] == "gpt-realtime-whisper"
     assert metadata["segment_count"] == 2
 
 

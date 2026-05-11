@@ -10,7 +10,7 @@ from kado_transcriber.cuda_check import check_cuda
 from kado_transcriber.exporters import export_all, format_timestamp
 from kado_transcriber.hashing import file_sha256
 from kado_transcriber.skip import should_skip_existing
-from kado_transcriber.transcriber import FasterWhisperTranscriber
+from kado_transcriber.transcriber import TranscriberProtocol, create_transcriber
 
 app = typer.Typer(help="CUDA-first Spanish interview transcription for KADO.")
 console = Console()
@@ -23,7 +23,7 @@ def inspect_config() -> None:
     table.add_column("Setting")
     table.add_column("Value")
     for key, value in settings.model_dump().items():
-        if key == "hf_token" and value:
+        if key in {"hf_token", "openai_api_key"} and value:
             value = "***"
         table.add_row(key, str(value))
     console.print(table)
@@ -94,7 +94,7 @@ def _transcribe_files(files: list[Path], output_root: Path, settings: Settings) 
     table.add_column("Compute")
     table.add_column("Batch")
 
-    transcriber: FasterWhisperTranscriber | None = None
+    transcriber: TranscriberProtocol | None = None
 
     for media_file in files:
         source_sha256 = file_sha256(media_file)
@@ -115,7 +115,7 @@ def _transcribe_files(files: list[Path], output_root: Path, settings: Settings) 
             continue
 
         if transcriber is None:
-            transcriber = FasterWhisperTranscriber(settings)
+            transcriber = create_transcriber(settings)
 
         result = transcriber.transcribe_file(
             media_file,

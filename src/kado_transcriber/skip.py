@@ -5,6 +5,7 @@ from kado_transcriber.config import Settings
 
 
 CONFIG_FIELDS = {
+    "transcription_backend": "transcription_backend",
     "model_name": "whisper_model_name",
     "device": "whisper_device",
     "compute_type": "whisper_compute_type",
@@ -16,7 +17,6 @@ CONFIG_FIELDS = {
     "min_silence_duration_ms": "whisper_min_silence_duration_ms",
     "condition_on_previous_text": "whisper_condition_on_previous_text",
 }
-
 
 def should_skip_existing(output_dir: Path, source_sha256: str, settings: Settings) -> bool:
     if not settings.skip_existing:
@@ -45,6 +45,11 @@ def should_skip_existing(output_dir: Path, source_sha256: str, settings: Setting
 
 
 def _metadata_matches_settings(metadata: dict, settings: Settings) -> bool:
+    if settings.transcription_backend == "openai-whisper":
+        return _openai_whisper_metadata_matches_settings(metadata, settings)
+    if settings.transcription_backend == "openai-realtime-whisper":
+        return _openai_realtime_metadata_matches_settings(metadata, settings)
+
     expected_variants = [settings]
     fallback_settings = _cpu_fallback_variant(settings)
     if fallback_settings is not None:
@@ -57,6 +62,32 @@ def _metadata_matches_settings(metadata: dict, settings: Settings) -> bool:
         ):
             return True
     return False
+
+
+def _openai_whisper_metadata_matches_settings(metadata: dict, settings: Settings) -> bool:
+    expected = {
+        "transcription_backend": settings.transcription_backend,
+        "model_name": settings.openai_whisper_model,
+        "language": settings.whisper_language,
+        "initial_prompt_used": bool(settings.whisper_initial_prompt),
+        "openai_whisper_model": settings.openai_whisper_model,
+    }
+    return all(metadata.get(key) == value for key, value in expected.items())
+
+
+def _openai_realtime_metadata_matches_settings(metadata: dict, settings: Settings) -> bool:
+    expected = {
+        "transcription_backend": settings.transcription_backend,
+        "model_name": settings.openai_realtime_model,
+        "language": settings.whisper_language,
+        "initial_prompt_used": bool(settings.whisper_initial_prompt),
+        "openai_realtime_model": settings.openai_realtime_model,
+        "openai_realtime_audio_rate": settings.openai_realtime_audio_rate,
+        "openai_realtime_turn_detection": settings.openai_realtime_turn_detection,
+        "openai_realtime_noise_reduction": settings.openai_realtime_noise_reduction,
+        "openai_realtime_timeout_seconds": settings.openai_realtime_timeout_seconds,
+    }
+    return all(metadata.get(key) == value for key, value in expected.items())
 
 
 def _cpu_fallback_variant(settings: Settings) -> Settings | None:

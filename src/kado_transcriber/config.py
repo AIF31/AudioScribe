@@ -2,9 +2,18 @@ from pathlib import Path
 import os
 
 from dotenv import load_dotenv
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 load_dotenv()
+
+TRANSCRIPTION_BACKEND_FASTER_WHISPER = "faster-whisper"
+TRANSCRIPTION_BACKEND_OPENAI_WHISPER = "openai-whisper"
+TRANSCRIPTION_BACKEND_OPENAI_REALTIME = "openai-realtime-whisper"
+TRANSCRIPTION_BACKENDS = {
+    TRANSCRIPTION_BACKEND_FASTER_WHISPER,
+    TRANSCRIPTION_BACKEND_OPENAI_WHISPER,
+    TRANSCRIPTION_BACKEND_OPENAI_REALTIME,
+}
 
 
 def env_bool(name: str, default: str = "false") -> bool:
@@ -12,6 +21,12 @@ def env_bool(name: str, default: str = "false") -> bool:
 
 
 class Settings(BaseModel):
+    transcription_backend: str = Field(
+        default_factory=lambda: os.getenv(
+            "TRANSCRIPTION_BACKEND",
+            TRANSCRIPTION_BACKEND_FASTER_WHISPER,
+        )
+    )
     whisper_model_name: str = Field(
         default_factory=lambda: os.getenv("WHISPER_MODEL_NAME", "large-v3")
     )
@@ -41,6 +56,33 @@ class Settings(BaseModel):
         default_factory=lambda: os.getenv("WHISPER_INITIAL_PROMPT") or None
     )
     hf_token: str | None = Field(default_factory=lambda: os.getenv("HF_TOKEN") or None)
+    openai_api_key: str | None = Field(
+        default_factory=lambda: os.getenv("OPENAI_API_KEY") or None
+    )
+    openai_whisper_model: str = Field(
+        default_factory=lambda: os.getenv("OPENAI_WHISPER_MODEL", "whisper-1")
+    )
+    openai_realtime_model: str = Field(
+        default_factory=lambda: os.getenv("OPENAI_REALTIME_MODEL", "gpt-realtime-whisper")
+    )
+    openai_realtime_url: str = Field(
+        default_factory=lambda: os.getenv(
+            "OPENAI_REALTIME_URL",
+            "wss://api.openai.com/v1/realtime?intent=transcription",
+        )
+    )
+    openai_realtime_audio_rate: int = Field(
+        default_factory=lambda: int(os.getenv("OPENAI_REALTIME_AUDIO_RATE", "24000"))
+    )
+    openai_realtime_turn_detection: str = Field(
+        default_factory=lambda: os.getenv("OPENAI_REALTIME_TURN_DETECTION", "server_vad")
+    )
+    openai_realtime_noise_reduction: str = Field(
+        default_factory=lambda: os.getenv("OPENAI_REALTIME_NOISE_REDUCTION", "near_field")
+    )
+    openai_realtime_timeout_seconds: int = Field(
+        default_factory=lambda: int(os.getenv("OPENAI_REALTIME_TIMEOUT_SECONDS", "120"))
+    )
 
     input_audio_dir: Path = Field(
         default_factory=lambda: Path(os.getenv("INPUT_AUDIO_DIR", "./data/audio_raw"))
@@ -51,6 +93,22 @@ class Settings(BaseModel):
 
     skip_existing: bool = Field(default_factory=lambda: env_bool("SKIP_EXISTING", "true"))
     log_level: str = Field(default_factory=lambda: os.getenv("LOG_LEVEL", "INFO"))
+
+    @model_validator(mode="after")
+    def validate_backend(self) -> "Settings":
+        if self.transcription_backend not in TRANSCRIPTION_BACKENDS:
+            valid = ", ".join(sorted(TRANSCRIPTION_BACKENDS))
+            raise ValueError(f"TRANSCRIPTION_BACKEND must be one of: {valid}")
+        if (
+            self.transcription_backend
+            in {TRANSCRIPTION_BACKEND_OPENAI_WHISPER, TRANSCRIPTION_BACKEND_OPENAI_REALTIME}
+            and not self.openai_api_key
+        ):
+            raise ValueError(
+                "OPENAI_API_KEY is required when "
+                f"TRANSCRIPTION_BACKEND={self.transcription_backend}"
+            )
+        return self
 
 
 def get_settings() -> Settings:

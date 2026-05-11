@@ -1,7 +1,8 @@
 # KADO Transcription
 
 CUDA-first Spanish interview transcription for KADO using
-[SYSTRAN/faster-whisper](https://github.com/SYSTRAN/faster-whisper).
+[SYSTRAN/faster-whisper](https://github.com/SYSTRAN/faster-whisper), with an optional
+OpenAI cloud transcription backend.
 
 V1 is transcription-only. It does not include diarization, speaker labels, pyannote, NeMo,
 WhisperX, or LLM insight extraction.
@@ -11,6 +12,8 @@ WhisperX, or LLM insight extraction.
 - Python 3.10, 3.11, or 3.12
 - NVIDIA GPU and visible `nvidia-smi` for CUDA mode
 - CUDA 12 cuBLAS and cuDNN 9 runtime libraries for faster-whisper/CTranslate2
+- OpenAI API key only when using `TRANSCRIPTION_BACKEND=openai-whisper` or
+  `TRANSCRIPTION_BACKEND=openai-realtime-whisper`
 
 Faster-whisper decodes audio through PyAV, so system FFmpeg is not required for this v1
 pipeline.
@@ -57,6 +60,49 @@ HF_TOKEN=hf_your_token_here
 ```
 
 Create a token at <https://huggingface.co/settings/tokens>. Keep `.env` private.
+
+The real `.env` file is loaded by the app and is ignored by Git. Do not put real tokens in
+`.env.example`.
+
+## Backends
+
+Local faster-whisper is the default backend:
+
+```env
+TRANSCRIPTION_BACKEND=faster-whisper
+WHISPER_MODEL_NAME=large-v3
+WHISPER_DEVICE=cuda
+WHISPER_COMPUTE_TYPE=float16
+HF_TOKEN=hf_your_token_here
+```
+
+OpenAI cloud file transcription can be selected when you want to use the OpenAI Audio
+Transcriptions API instead of the local model:
+
+```env
+TRANSCRIPTION_BACKEND=openai-whisper
+OPENAI_API_KEY=sk_your_openai_api_key_here
+OPENAI_WHISPER_MODEL=whisper-1
+```
+
+OpenAI Realtime Whisper settings are also available for realtime-style transcription over
+the Realtime API:
+
+```env
+TRANSCRIPTION_BACKEND=openai-realtime-whisper
+OPENAI_API_KEY=sk_your_openai_api_key_here
+OPENAI_REALTIME_MODEL=gpt-realtime-whisper
+OPENAI_REALTIME_URL=wss://api.openai.com/v1/realtime?intent=transcription
+OPENAI_REALTIME_AUDIO_RATE=24000
+OPENAI_REALTIME_TURN_DETECTION=server_vad
+OPENAI_REALTIME_NOISE_REDUCTION=near_field
+OPENAI_REALTIME_TIMEOUT_SECONDS=120
+```
+
+The `openai-whisper` backend uploads the media file to the OpenAI Audio Transcriptions API.
+The `openai-realtime-whisper` backend decodes existing media files locally, resamples them
+to 24 kHz mono PCM, and streams the audio to a server-to-server Realtime transcription
+session.
 
 Check configuration:
 
@@ -106,10 +152,10 @@ data/transcripts/interview_001/
 ```
 
 `<original_file_name>_transcript.md` is the human-readable transcript with segment
-timestamps. `<original_file_name>_metadata.json` records source hash, model, device,
-compute type, batch size, language, VAD settings, and segment count. Existing outputs are
-skipped only when both files exist and the source hash plus transcription configuration
-still match.
+timestamps when the backend provides them. `<original_file_name>_metadata.json` records
+source hash, backend, model, device, compute type, batch size, language, VAD settings, and
+segment count. Existing outputs are skipped only when both files exist and the source hash
+plus transcription configuration still match.
 
 ## Model Settings
 

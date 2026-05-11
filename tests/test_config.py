@@ -5,6 +5,7 @@ from kado_transcriber.config import Settings, env_bool
 
 def test_default_settings_are_cuda_first(monkeypatch):
     for key in [
+        "TRANSCRIPTION_BACKEND",
         "WHISPER_MODEL_NAME",
         "WHISPER_DEVICE",
         "WHISPER_COMPUTE_TYPE",
@@ -12,11 +13,15 @@ def test_default_settings_are_cuda_first(monkeypatch):
         "WHISPER_BATCH_SIZE",
         "WHISPER_INITIAL_PROMPT",
         "HF_TOKEN",
+        "OPENAI_API_KEY",
+        "OPENAI_WHISPER_MODEL",
+        "OPENAI_REALTIME_MODEL",
     ]:
         monkeypatch.delenv(key, raising=False)
 
     settings = Settings()
 
+    assert settings.transcription_backend == "faster-whisper"
     assert settings.whisper_model_name == "large-v3"
     assert settings.whisper_device == "cuda"
     assert settings.whisper_compute_type == "float16"
@@ -25,6 +30,9 @@ def test_default_settings_are_cuda_first(monkeypatch):
     assert settings.whisper_allow_cpu_fallback is True
     assert settings.whisper_initial_prompt is None
     assert settings.hf_token is None
+    assert settings.openai_api_key is None
+    assert settings.openai_whisper_model == "whisper-1"
+    assert settings.openai_realtime_model == "gpt-realtime-whisper"
 
 
 def test_bool_parsing(monkeypatch):
@@ -64,3 +72,39 @@ def test_hf_token_loads_from_env(monkeypatch):
     settings = Settings()
 
     assert settings.hf_token == "hf_test_token"
+
+
+def test_openai_realtime_backend_requires_api_key(monkeypatch):
+    monkeypatch.setenv("TRANSCRIPTION_BACKEND", "openai-realtime-whisper")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    try:
+        Settings()
+    except ValueError as exc:
+        assert "OPENAI_API_KEY is required" in str(exc)
+    else:
+        raise AssertionError("Expected missing OpenAI API key to fail")
+
+
+def test_openai_whisper_backend_loads_from_env(monkeypatch):
+    monkeypatch.setenv("TRANSCRIPTION_BACKEND", "openai-whisper")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk_test_key")
+    monkeypatch.setenv("OPENAI_WHISPER_MODEL", "whisper-1")
+
+    settings = Settings()
+
+    assert settings.transcription_backend == "openai-whisper"
+    assert settings.openai_api_key == "sk_test_key"
+    assert settings.openai_whisper_model == "whisper-1"
+
+
+def test_openai_realtime_backend_loads_from_env(monkeypatch):
+    monkeypatch.setenv("TRANSCRIPTION_BACKEND", "openai-realtime-whisper")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk_test_key")
+    monkeypatch.setenv("OPENAI_REALTIME_MODEL", "gpt-realtime-whisper")
+
+    settings = Settings()
+
+    assert settings.transcription_backend == "openai-realtime-whisper"
+    assert settings.openai_api_key == "sk_test_key"
+    assert settings.openai_realtime_model == "gpt-realtime-whisper"
