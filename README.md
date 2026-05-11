@@ -1,29 +1,74 @@
-# Audio Transcription
+# AudioScribe
 
-Audio Transcription is a small command-line project for turning audio and video files into Markdown transcripts. It can run locally with faster-whisper, or use OpenAI cloud transcription when you prefer an API-based workflow.
+<p align="center">
+  <img src="Images/AudioScribe.png" alt="AudioScribe local-first audio transcription" width="100%">
+</p>
 
-The project is useful for lectures, calls, voice notes, meetings, podcasts, research recordings, and other media files where you want a clean transcript plus metadata.
+<p align="center">
+  <strong>Local-first audio and video transcription with a simple CLI, reproducible outputs, and optional OpenAI cloud transcription.</strong>
+</p>
 
-## What It Does
+<p align="center">
+  <a href="#quick-start">Quick start</a>
+  ·
+  <a href="#backends">Backends</a>
+  ·
+  <a href="#codex-skill">Codex skill</a>
+  ·
+  <a href="docs/technical-guide.md">Technical guide</a>
+</p>
 
-- Transcribes individual audio/video files or whole folders.
-- Supports common media formats like `.mp3`, `.m4a`, `.wav`, `.mp4`, `.mov`, `.webm`, `.ogg`, `.flac`, and `.aac`.
-- Writes a readable Markdown transcript for each file.
-- Writes metadata with the source hash, model, backend, language, and segment count.
-- Skips files that were already transcribed with the same settings.
-- Lets you choose between local transcription and OpenAI cloud transcription.
+<p align="center">
+  <img alt="Python 3.10-3.12" src="https://img.shields.io/badge/python-3.10--3.12-39d5ff">
+  <img alt="Local backend" src="https://img.shields.io/badge/local-faster--whisper-59f0c8">
+  <img alt="Cloud backend" src="https://img.shields.io/badge/cloud-OpenAI%20Whisper-39d5ff">
+  <img alt="Interface" src="https://img.shields.io/badge/interface-CLI-0b1220">
+</p>
 
-## Choose A Backend
+AudioScribe turns recordings into clean Markdown transcripts and metadata files. It is built for people who want a practical transcription pipeline they can run from the terminal: local when privacy or cost matters, cloud-backed when convenience matters.
 
-Local mode runs on your machine:
+## Why AudioScribe
+
+- **Local-first by default**: use `faster-whisper` on CPU or CUDA without sending media to an external service.
+- **Cloud when you want it**: switch to OpenAI transcription with one `.env` setting and an API key.
+- **Batch-friendly outputs**: transcribe a file or a folder and get one organized output directory per source file.
+- **Reproducible skips**: completed transcripts are skipped when the source hash and transcription settings still match.
+- **Codex-ready**: includes an installable Codex skill so agents can use the project after a fresh clone.
+- **Common formats**: supports `.mp3`, `.m4a`, `.wav`, `.mp4`, `.mov`, `.webm`, `.ogg`, `.flac`, and `.aac`.
+
+## Quick Start
+
+```bash
+git clone https://github.com/AIF31/AudioScribe.git
+cd AudioScribe
+
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -e ".[dev]"
+
+cp .env.example .env
+audio-transcribe transcribe-file ./data/audio_raw/example.m4a
+```
+
+For NVIDIA GPU acceleration, install the CUDA extras:
+
+```bash
+python -m pip install -e ".[dev,cuda]"
+source scripts/setup_cuda_env.sh
+```
+
+## Backends
+
+Choose the backend in `.env`.
 
 ```env
 TRANSCRIPTION_BACKEND=faster-whisper
+WHISPER_MODEL_NAME=large-v3
+WHISPER_DEVICE=cpu
+WHISPER_COMPUTE_TYPE=int8
 ```
 
-Use this when you want local processing, lower API cost, or GPU acceleration with CUDA. The first run may download a faster-whisper model from Hugging Face.
-
-OpenAI cloud mode sends the media file to the OpenAI Audio Transcriptions API:
+Use local mode when you want transcription to run on your own machine. Switch `WHISPER_DEVICE=cuda` and `WHISPER_COMPUTE_TYPE=float16` for GPU-backed runs.
 
 ```env
 TRANSCRIPTION_BACKEND=openai-whisper
@@ -31,36 +76,9 @@ OPENAI_API_KEY=sk_your_openai_api_key_here
 OPENAI_WHISPER_MODEL=whisper-1
 ```
 
-Use this when you want a simple cloud-backed transcription path and have an OpenAI API key.
+Use cloud mode when you prefer an API-backed workflow. Keep real keys only in `.env`; the file is ignored by Git.
 
-## Quick Start
-
-Create the environment:
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install -e ".[dev,cuda]"
-cp .env.example .env
-```
-
-For CPU-only or OpenAI cloud usage, installing without CUDA extras is enough:
-
-```bash
-python -m pip install -e ".[dev]"
-```
-
-Edit `.env` and choose your backend. Keep real API keys only in `.env`; it is ignored by Git.
-
-## Transcribe A File
-
-Put media files in `data/audio_raw`, then run:
-
-```bash
-audio-transcribe transcribe-file ./data/audio_raw/example.m4a
-```
-
-Transcripts are written to:
+AudioScribe creates a predictable output folder for each input file:
 
 ```text
 data/transcripts/example/
@@ -68,50 +86,39 @@ data/transcripts/example/
   example_metadata.json
 ```
 
-## Transcribe A Folder
+The transcript is written for reading and review. The metadata records the backend, model, device, language, source hash, and segment count so repeated runs can be compared safely.
+
+## CLI
 
 ```bash
+# Inspect the active configuration
+audio-transcribe inspect-config
+
+# Transcribe one file
+audio-transcribe transcribe-file ./data/audio_raw/example.m4a
+
+# Transcribe a folder
 audio-transcribe transcribe-batch \
   --input-dir ./data/audio_raw \
   --output-dir ./data/transcripts
 ```
 
-## Recommended Settings
-
-For NVIDIA GPU local transcription:
-
-```env
-TRANSCRIPTION_BACKEND=faster-whisper
-WHISPER_MODEL_NAME=large-v3
-WHISPER_DEVICE=cuda
-WHISPER_COMPUTE_TYPE=float16
-WHISPER_BATCH_SIZE=8
-```
-
-For CPU local transcription:
-
-```bash
-cp .env.cpu.example .env
-```
-
-For OpenAI cloud transcription:
-
-```env
-TRANSCRIPTION_BACKEND=openai-whisper
-OPENAI_API_KEY=sk_your_openai_api_key_here
-OPENAI_WHISPER_MODEL=whisper-1
-```
-
 ## Codex Skill
 
-This repo includes a reusable Codex skill at `codex/skills/audio-transcription`. After a fresh clone, install it into `${CODEX_HOME:-$HOME/.codex}/skills`:
+AudioScribe ships with a Codex skill in `codex/skills/audio-transcription`. Install it after cloning:
 
 ```bash
 scripts/install_codex_skill.sh
 ```
 
-See [docs/codex-skill.md](docs/codex-skill.md) for details.
+After restarting Codex, use the `audio-transcription` skill to transcribe audio or video files through the same local or cloud backends. See [docs/codex-skill.md](docs/codex-skill.md).
 
-## More Details
+## Documentation
 
-For CUDA setup, realtime settings, configuration reference, and troubleshooting, see [docs/technical-guide.md](docs/technical-guide.md).
+- [Technical guide](docs/technical-guide.md): CUDA setup, realtime settings, configuration reference, and troubleshooting.
+- [Codex skill guide](docs/codex-skill.md): installing and using the bundled Codex skill.
+- [.env.example](.env.example): documented configuration template with safe placeholder values.
+
+## Project Status
+
+AudioScribe is intentionally small: a focused CLI, clear configuration, and transcript outputs that are easy to review or feed into downstream workflows.

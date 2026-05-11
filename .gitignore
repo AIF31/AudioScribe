@@ -12,3 +12,4 @@ data/audio_raw/**
 data/transcripts/**
 !data/audio_raw/.gitkeep
 !data/transcripts/.gitkeep
+*:Zone.Identifier
