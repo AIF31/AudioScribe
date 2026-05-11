@@ -2,8 +2,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 import json
 
-from kado_transcriber.config import Settings
-from kado_transcriber.transcriber import TranscriptResult
+from audio_transcriber.config import Settings
+from audio_transcriber.transcriber import TranscriptResult
 
 
 def output_stem(result: TranscriptResult) -> str:

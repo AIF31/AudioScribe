@@ -1,0 +1,4 @@
+interface:
+  display_name: "Audio Transcription"
+  short_description: "Transcribe audio locally or with OpenAI."
+  default_prompt: "Transcribe these audio files with the Audio Transcription skill."

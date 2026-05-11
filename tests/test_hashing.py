@@ -1,4 +1,4 @@
-from kado_transcriber.hashing import file_sha256
+from audio_transcriber.hashing import file_sha256
 
 
 def test_file_sha256_same_content(tmp_path):

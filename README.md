@@ -1,83 +1,29 @@
-# KADO Transcription
+# Audio Transcription
 
-CUDA-first Spanish interview transcription for KADO using
-[SYSTRAN/faster-whisper](https://github.com/SYSTRAN/faster-whisper), with an optional
-OpenAI cloud transcription backend.
+Audio Transcription is a small command-line project for turning audio and video files into Markdown transcripts. It can run locally with faster-whisper, or use OpenAI cloud transcription when you prefer an API-based workflow.
 
-V1 is transcription-only. It does not include diarization, speaker labels, pyannote, NeMo,
-WhisperX, or LLM insight extraction.
+The project is useful for lectures, calls, voice notes, meetings, podcasts, research recordings, and other media files where you want a clean transcript plus metadata.
 
-## Requirements
+## What It Does
 
-- Python 3.10, 3.11, or 3.12
-- NVIDIA GPU and visible `nvidia-smi` for CUDA mode
-- CUDA 12 cuBLAS and cuDNN 9 runtime libraries for faster-whisper/CTranslate2
-- OpenAI API key only when using `TRANSCRIPTION_BACKEND=openai-whisper` or
-  `TRANSCRIPTION_BACKEND=openai-realtime-whisper`
+- Transcribes individual audio/video files or whole folders.
+- Supports common media formats like `.mp3`, `.m4a`, `.wav`, `.mp4`, `.mov`, `.webm`, `.ogg`, `.flac`, and `.aac`.
+- Writes a readable Markdown transcript for each file.
+- Writes metadata with the source hash, model, backend, language, and segment count.
+- Skips files that were already transcribed with the same settings.
+- Lets you choose between local transcription and OpenAI cloud transcription.
 
-Faster-whisper decodes audio through PyAV, so system FFmpeg is not required for this v1
-pipeline.
+## Choose A Backend
 
-If you run this project from a sandboxed agent session, CUDA checks and CUDA transcription
-commands should be executed outside the sandbox. Sandboxed sessions can block GPU access
-and surface misleading CUDA initialization errors even when the host NVIDIA/WSL setup is
-healthy.
-
-## Install
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install -e ".[dev,cuda]"
-cp .env.example .env
-source scripts/setup_cuda_env.sh
-```
-
-If you use `uv`:
-
-```bash
-uv venv
-source .venv/bin/activate
-uv pip install -e ".[dev,cuda]"
-cp .env.example .env
-source scripts/setup_cuda_env.sh
-```
-
-The CUDA library helper uses the NVIDIA Python wheels:
-
-```bash
-python -m pip install nvidia-cublas-cu12 nvidia-cudnn-cu12==9.*
-source scripts/setup_cuda_env.sh
-```
-
-## Usage
-
-Optional: set a Hugging Face token in `.env` before the first model download for higher
-rate limits:
-
-```env
-HF_TOKEN=hf_your_token_here
-```
-
-Create a token at <https://huggingface.co/settings/tokens>. Keep `.env` private.
-
-The real `.env` file is loaded by the app and is ignored by Git. Do not put real tokens in
-`.env.example`.
-
-## Backends
-
-Local faster-whisper is the default backend:
+Local mode runs on your machine:
 
 ```env
 TRANSCRIPTION_BACKEND=faster-whisper
-WHISPER_MODEL_NAME=large-v3
-WHISPER_DEVICE=cuda
-WHISPER_COMPUTE_TYPE=float16
-HF_TOKEN=hf_your_token_here
 ```
 
-OpenAI cloud file transcription can be selected when you want to use the OpenAI Audio
-Transcriptions API instead of the local model:
+Use this when you want local processing, lower API cost, or GPU acceleration with CUDA. The first run may download a faster-whisper model from Hugging Face.
+
+OpenAI cloud mode sends the media file to the OpenAI Audio Transcriptions API:
 
 ```env
 TRANSCRIPTION_BACKEND=openai-whisper
@@ -85,149 +31,87 @@ OPENAI_API_KEY=sk_your_openai_api_key_here
 OPENAI_WHISPER_MODEL=whisper-1
 ```
 
-OpenAI Realtime Whisper settings are also available for realtime-style transcription over
-the Realtime API:
+Use this when you want a simple cloud-backed transcription path and have an OpenAI API key.
 
-```env
-TRANSCRIPTION_BACKEND=openai-realtime-whisper
-OPENAI_API_KEY=sk_your_openai_api_key_here
-OPENAI_REALTIME_MODEL=gpt-realtime-whisper
-OPENAI_REALTIME_URL=wss://api.openai.com/v1/realtime?intent=transcription
-OPENAI_REALTIME_AUDIO_RATE=24000
-OPENAI_REALTIME_TURN_DETECTION=server_vad
-OPENAI_REALTIME_NOISE_REDUCTION=near_field
-OPENAI_REALTIME_TIMEOUT_SECONDS=120
-```
+## Quick Start
 
-The `openai-whisper` backend uploads the media file to the OpenAI Audio Transcriptions API.
-The `openai-realtime-whisper` backend decodes existing media files locally, resamples them
-to 24 kHz mono PCM, and streams the audio to a server-to-server Realtime transcription
-session.
-
-Check configuration:
+Create the environment:
 
 ```bash
-kado-transcribe inspect-config
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -e ".[dev,cuda]"
+cp .env.example .env
 ```
 
-Check CUDA:
+For CPU-only or OpenAI cloud usage, installing without CUDA extras is enough:
 
 ```bash
-kado-transcribe check-cuda
+python -m pip install -e ".[dev]"
 ```
 
-Run `kado-transcribe check-cuda` outside the sandbox if you want to validate real GPU
-availability.
+Edit `.env` and choose your backend. Keep real API keys only in `.env`; it is ignored by Git.
 
-Transcribe one file:
+## Transcribe A File
+
+Put media files in `data/audio_raw`, then run:
 
 ```bash
-kado-transcribe transcribe-file ./data/audio_raw/interview_001.mp3
+audio-transcribe transcribe-file ./data/audio_raw/example.m4a
 ```
 
-If `WHISPER_DEVICE=cuda`, run the transcription command outside the sandbox.
+Transcripts are written to:
 
-Transcribe a batch:
+```text
+data/transcripts/example/
+  example_transcript.md
+  example_metadata.json
+```
+
+## Transcribe A Folder
 
 ```bash
-kado-transcribe transcribe-batch \
+audio-transcribe transcribe-batch \
   --input-dir ./data/audio_raw \
   --output-dir ./data/transcripts
 ```
 
-Module invocation also works:
+## Recommended Settings
 
-```bash
-python -m kado_transcriber.cli transcribe-batch
-```
-
-## Outputs
-
-Each interview writes:
-
-```text
-data/transcripts/interview_001/
-  interview_001_transcript.md
-  interview_001_metadata.json
-```
-
-`<original_file_name>_transcript.md` is the human-readable transcript with segment
-timestamps when the backend provides them. `<original_file_name>_metadata.json` records
-source hash, backend, model, device, compute type, batch size, language, VAD settings, and
-segment count. Existing outputs are skipped only when both files exist and the source hash
-plus transcription configuration still match.
-
-## Model Settings
-
-Default CUDA quality mode:
+For NVIDIA GPU local transcription:
 
 ```env
+TRANSCRIPTION_BACKEND=faster-whisper
 WHISPER_MODEL_NAME=large-v3
 WHISPER_DEVICE=cuda
 WHISPER_COMPUTE_TYPE=float16
 WHISPER_BATCH_SIZE=8
 ```
 
-Lower-VRAM CUDA mode:
-
-```bash
-cp .env.cuda.low-vram.example .env
-```
-
-CPU fallback:
+For CPU local transcription:
 
 ```bash
 cp .env.cpu.example .env
 ```
 
-For KADO interviews, Spanish is the default language:
+For OpenAI cloud transcription:
 
 ```env
-WHISPER_LANGUAGE=es
-WHISPER_TASK=transcribe
+TRANSCRIPTION_BACKEND=openai-whisper
+OPENAI_API_KEY=sk_your_openai_api_key_here
+OPENAI_WHISPER_MODEL=whisper-1
 ```
 
-## Quality Review
+## Codex Skill
 
-Before running all long interviews, transcribe a short representative file and review
-`transcript.md`. If CUDA memory fails, reduce `WHISPER_BATCH_SIZE` or switch to
-`WHISPER_COMPUTE_TYPE=int8_float16`.
-
-## Troubleshooting
-
-If `nvidia-smi` is not found, fix NVIDIA/WSL GPU visibility before debugging Python.
-
-If a CUDA command fails in a sandboxed session, rerun the same command outside the sandbox
-before assuming the host driver or WSL GPU setup is broken.
-
-If CUDA libraries are not found:
+This repo includes a reusable Codex skill at `codex/skills/audio-transcription`. After a fresh clone, install it into `${CODEX_HOME:-$HOME/.codex}/skills`:
 
 ```bash
-python -m pip install nvidia-cublas-cu12 nvidia-cudnn-cu12==9.*
-source scripts/setup_cuda_env.sh
+scripts/install_codex_skill.sh
 ```
 
-If CUDA runs out of memory:
+See [docs/codex-skill.md](docs/codex-skill.md) for details.
 
-```env
-WHISPER_BATCH_SIZE=4
-WHISPER_COMPUTE_TYPE=int8_float16
-```
+## More Details
 
-If it still fails:
-
-```env
-WHISPER_BATCH_SIZE=2
-```
-
-or use CPU fallback:
-
-```env
-WHISPER_DEVICE=cpu
-WHISPER_COMPUTE_TYPE=int8
-WHISPER_BATCH_SIZE=1
-```
-
-The first transcription may download the selected faster-whisper model. Later runs reuse
-the local cache. Use `HF_TOKEN` if unauthenticated Hugging Face downloads are slow or rate
-limited.
+For CUDA setup, realtime settings, configuration reference, and troubleshooting, see [docs/technical-guide.md](docs/technical-guide.md).

@@ -1,7 +1,7 @@
 from pathlib import Path
 import json
 
-from kado_transcriber.config import Settings
+from audio_transcriber.config import Settings
 
 
 CONFIG_FIELDS = {

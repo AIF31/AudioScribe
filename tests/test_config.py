@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from kado_transcriber.config import Settings, env_bool
+from audio_transcriber.config import Settings, env_bool
 
 
 def test_default_settings_are_cuda_first(monkeypatch):
@@ -25,7 +25,7 @@ def test_default_settings_are_cuda_first(monkeypatch):
     assert settings.whisper_model_name == "large-v3"
     assert settings.whisper_device == "cuda"
     assert settings.whisper_compute_type == "float16"
-    assert settings.whisper_language == "es"
+    assert settings.whisper_language == "en"
     assert settings.whisper_batch_size == 8
     assert settings.whisper_allow_cpu_fallback is True
     assert settings.whisper_initial_prompt is None

@@ -34,7 +34,7 @@ class Settings(BaseModel):
     whisper_compute_type: str = Field(
         default_factory=lambda: os.getenv("WHISPER_COMPUTE_TYPE", "float16")
     )
-    whisper_language: str = Field(default_factory=lambda: os.getenv("WHISPER_LANGUAGE", "es"))
+    whisper_language: str = Field(default_factory=lambda: os.getenv("WHISPER_LANGUAGE", "en"))
     whisper_task: str = Field(default_factory=lambda: os.getenv("WHISPER_TASK", "transcribe"))
     whisper_beam_size: int = Field(default_factory=lambda: int(os.getenv("WHISPER_BEAM_SIZE", "5")))
     whisper_batch_size: int = Field(

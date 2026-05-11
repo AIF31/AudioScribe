@@ -4,7 +4,7 @@ import json
 
 from pydantic import BaseModel
 
-from kado_transcriber.config import (
+from audio_transcriber.config import (
     TRANSCRIPTION_BACKEND_FASTER_WHISPER,
     TRANSCRIPTION_BACKEND_OPENAI_WHISPER,
     TRANSCRIPTION_BACKEND_OPENAI_REALTIME,

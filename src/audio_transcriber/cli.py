@@ -4,22 +4,22 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from kado_transcriber.audio import discover_media_files
-from kado_transcriber.config import Settings, get_settings
-from kado_transcriber.cuda_check import check_cuda
-from kado_transcriber.exporters import export_all, format_timestamp
-from kado_transcriber.hashing import file_sha256
-from kado_transcriber.skip import should_skip_existing
-from kado_transcriber.transcriber import TranscriberProtocol, create_transcriber
+from audio_transcriber.audio import discover_media_files
+from audio_transcriber.config import Settings, get_settings
+from audio_transcriber.cuda_check import check_cuda
+from audio_transcriber.exporters import export_all, format_timestamp
+from audio_transcriber.hashing import file_sha256
+from audio_transcriber.skip import should_skip_existing
+from audio_transcriber.transcriber import TranscriberProtocol, create_transcriber
 
-app = typer.Typer(help="CUDA-first Spanish interview transcription for KADO.")
+app = typer.Typer(help="Audio transcription with local faster-whisper or OpenAI models.")
 console = Console()
 
 
 @app.command("inspect-config")
 def inspect_config() -> None:
     settings = get_settings()
-    table = Table(title="KADO Transcriber Settings")
+    table = Table(title="Audio Transcriber Settings")
     table.add_column("Setting")
     table.add_column("Value")
     for key, value in settings.model_dump().items():

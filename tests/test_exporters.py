@@ -1,7 +1,7 @@
 import json
 
-from kado_transcriber.config import Settings
-from kado_transcriber.exporters import (
+from audio_transcriber.config import Settings
+from audio_transcriber.exporters import (
     export_all,
     export_md,
     export_metadata,
@@ -9,14 +9,14 @@ from kado_transcriber.exporters import (
     metadata_filename,
     transcript_filename,
 )
-from kado_transcriber.transcriber import TranscriptResult, TranscriptSegment
+from audio_transcriber.transcriber import TranscriptResult, TranscriptSegment
 
 
 def sample_result() -> TranscriptResult:
     return TranscriptResult(
-        source_file="interview_001.mp3",
+        source_file="sample_001.mp3",
         source_sha256="abc123",
-        language="es",
+        language="en",
         language_probability=0.99,
         duration=65.4,
         model_name="large-v3",
@@ -41,8 +41,8 @@ def test_export_md(tmp_path):
     output = export_md(sample_result(), tmp_path)
     text = output.read_text(encoding="utf-8")
 
-    assert output.name == "interview_001_transcript.md"
-    assert "# Transcript: interview_001" in text
+    assert output.name == "sample_001_transcript.md"
+    assert "# Transcript: sample_001" in text
     assert "- Backend: faster-whisper" in text
     assert "[00:00:00 - 00:00:04]" in text
     assert "Hola." in text
@@ -53,7 +53,7 @@ def test_export_metadata(tmp_path):
     output = export_metadata(sample_result(), tmp_path, Settings())
     metadata = json.loads(output.read_text(encoding="utf-8"))
 
-    assert output.name == "interview_001_metadata.json"
+    assert output.name == "sample_001_metadata.json"
     assert metadata["source_sha256"] == "abc123"
     assert metadata["transcription_backend"] == "faster-whisper"
     assert metadata["model_name"] == "large-v3"
@@ -71,7 +71,7 @@ def test_export_metadata(tmp_path):
 def test_export_all_only_writes_markdown_and_metadata(tmp_path):
     outputs = export_all(sample_result(), tmp_path, Settings())
 
-    expected = ["interview_001_metadata.json", "interview_001_transcript.md"]
+    expected = ["sample_001_metadata.json", "sample_001_transcript.md"]
     assert sorted(path.name for path in outputs) == expected
     assert sorted(path.name for path in tmp_path.iterdir()) == expected
 
@@ -79,5 +79,5 @@ def test_export_all_only_writes_markdown_and_metadata(tmp_path):
 def test_output_filenames_use_original_stem():
     result = sample_result()
 
-    assert transcript_filename(result) == "interview_001_transcript.md"
-    assert metadata_filename(result) == "interview_001_metadata.json"
+    assert transcript_filename(result) == "sample_001_transcript.md"
+    assert metadata_filename(result) == "sample_001_metadata.json"

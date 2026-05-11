@@ -2,8 +2,8 @@ from types import SimpleNamespace
 import sys
 import json
 
-from kado_transcriber.config import Settings
-from kado_transcriber.transcriber import (
+from audio_transcriber.config import Settings
+from audio_transcriber.transcriber import (
     FasterWhisperTranscriber,
     OpenAIRealtimeWhisperTranscriber,
     OpenAIWhisperTranscriber,
@@ -30,7 +30,7 @@ class _FakeModel:
         return [
             _FakeSegment(0.0, 1.0, "Hola"),
             _FakeSegment(1.0, 2.0, "mundo"),
-        ], SimpleNamespace(language="es", language_probability=0.99, duration=2.0)
+        ], SimpleNamespace(language="en", language_probability=0.99, duration=2.0)
 
 
 class _FakePipeline:
@@ -179,7 +179,7 @@ def test_openai_realtime_transcriber_sends_session_and_audio(monkeypatch, tmp_pa
     )
     monkeypatch.setitem(sys.modules, "websocket", fake_websocket_module)
     monkeypatch.setattr(
-        "kado_transcriber.transcriber._decode_audio_pcm_chunks",
+        "audio_transcriber.transcriber._decode_audio_pcm_chunks",
         lambda *_args, **_kwargs: [b"pcm-bytes"],
     )
 
