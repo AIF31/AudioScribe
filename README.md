@@ -16,6 +16,8 @@
   <a href="#codex-skill">Codex skill</a>
   ·
   <a href="docs/technical-guide.md">Technical guide</a>
+  ·
+  <a href="docs/amd-rocm.md">AMD ROCm/HIP</a>
 </p>
 
 <p align="center">
@@ -29,7 +31,7 @@ AudioScribe turns recordings into clean Markdown transcripts and metadata files.
 
 ## Why AudioScribe
 
-- **Local-first by default**: use `faster-whisper` on CPU or CUDA without sending media to an external service.
+- **Local-first by default**: use `faster-whisper` on CPU, NVIDIA CUDA, or experimental AMD ROCm/HIP without sending media to an external service.
 - **Cloud when you want it**: switch to OpenAI transcription with one `.env` setting and an API key.
 - **Batch-friendly outputs**: transcribe a file or a folder and get one organized output directory per source file.
 - **Reproducible skips**: completed transcripts are skipped when the source hash and transcription settings still match.
@@ -55,7 +57,19 @@ For NVIDIA GPU acceleration, install the CUDA extras:
 ```bash
 python -m pip install -e ".[dev,cuda]"
 source scripts/setup_cuda_env.sh
+cp .env.cuda.low-vram.example .env
+audio-transcribe check-accelerator
 ```
+
+For **experimental** AMD ROCm/HIP acceleration, install AudioScribe without CUDA extras, then install a ROCm/HIP-enabled CTranslate2 wheel from the CTranslate2 release page or build CTranslate2 with `-DWITH_HIP=ON`:
+
+```bash
+python -m pip install -e ".[dev]"
+cp .env.rocm.example .env
+audio-transcribe check-accelerator
+```
+
+ROCm/HIP support is experimental and is not enabled by the `rocm` extra alone. AMD users must install a ROCm/HIP-enabled CTranslate2 wheel or build CTranslate2 with HIP support. See [docs/amd-rocm.md](docs/amd-rocm.md) and [docs/windows-hip.md](docs/windows-hip.md).
 
 ## Backends
 
@@ -69,6 +83,18 @@ WHISPER_COMPUTE_TYPE=int8
 ```
 
 Use local mode when you want transcription to run on your own machine. Switch `WHISPER_DEVICE=cuda` and `WHISPER_COMPUTE_TYPE=float16` for GPU-backed runs. CPU mode (`WHISPER_DEVICE=cpu`) is significantly slower and only recommended for short or small files.
+
+AMD ROCm/HIP support is experimental. It depends on the GPU, OS, ROCm/HIP runtime, and CTranslate2 wheel/build compatibility. Select it with `WHISPER_ACCELERATOR=rocm` and keep `WHISPER_DEVICE=cuda`; CTranslate2/faster-whisper use `device="cuda"` for GPU execution on ROCm builds.
+
+`WHISPER_ACCELERATOR` names the user-facing runtime family. `WHISPER_DEVICE` is the device string passed to CTranslate2. For both NVIDIA CUDA and AMD ROCm/HIP GPU execution, that device string is `cuda`.
+
+| Runtime | Status | Install path | Notes |
+|---|---|---|---|
+| CPU | Stable | `python -m pip install -e ".[dev]"` | Best fallback; use `WHISPER_ACCELERATOR=cpu`, `WHISPER_DEVICE=cpu`, `WHISPER_COMPUTE_TYPE=int8`, `WHISPER_BATCH_SIZE=1`. |
+| NVIDIA CUDA | Stable | `python -m pip install -e ".[dev,cuda]"` + `source scripts/setup_cuda_env.sh` | Existing path; use `WHISPER_ACCELERATOR=cuda`, `WHISPER_DEVICE=cuda`. |
+| AMD ROCm/HIP | Experimental | Install AudioScribe without CUDA extras, then install a ROCm/HIP-enabled CTranslate2 wheel or build CTranslate2 with `-DWITH_HIP=ON`. | Use `WHISPER_ACCELERATOR=rocm` and keep `WHISPER_DEVICE=cuda`. |
+| OpenAI cloud file | Stable | `TRANSCRIPTION_BACKEND=openai-whisper` | No local GPU. |
+| OpenAI realtime | Experimental | `TRANSCRIPTION_BACKEND=openai-realtime-whisper` | No local GPU. |
 
 ```env
 TRANSCRIPTION_BACKEND=openai-whisper
@@ -86,13 +112,16 @@ data/transcripts/example/
   example_metadata.json
 ```
 
-The transcript is written for reading and review. The metadata records the backend, model, device, language, source hash, and segment count so repeated runs can be compared safely.
+The transcript is written for reading and review. The metadata records the backend, model, accelerator, device, language, source hash, and segment count so repeated runs can be compared safely. For an AMD GPU run, successful metadata should show `requested_accelerator: rocm`, `accelerator: rocm`, and `device: cuda`.
 
 ## CLI
 
 ```bash
 # Inspect the active configuration
 audio-transcribe inspect-config
+
+# Check CPU, CUDA, or ROCm/HIP runtime configuration
+audio-transcribe check-accelerator
 
 # Transcribe one file
 audio-transcribe transcribe-file ./data/audio_raw/example.m4a
@@ -116,6 +145,8 @@ After restarting Codex, use the `audio-transcription` skill to transcribe audio 
 ## Documentation
 
 - [Technical guide](docs/technical-guide.md): CUDA setup, realtime settings, configuration reference, and troubleshooting.
+- [AMD ROCm/HIP guide](docs/amd-rocm.md): experimental AMD GPU setup and troubleshooting.
+- [Windows HIP SDK guide](docs/windows-hip.md): AMD Windows GPU setup for cards such as the RX 6950 XT.
 - [Codex skill guide](docs/codex-skill.md): installing and using the bundled Codex skill.
 - [.env.example](.env.example): documented configuration template with safe placeholder values.
 

@@ -41,6 +41,8 @@ Copy `.env.example` to `.env` and put real secrets only in `.env`.
 
 - `HF_TOKEN` is optional and only needed for higher Hugging Face model download limits.
 - `OPENAI_API_KEY` is required for `TRANSCRIPTION_BACKEND=openai-whisper` or `TRANSCRIPTION_BACKEND=openai-realtime-whisper`.
+- Use `audio-transcribe inspect-config` and `audio-transcribe check-accelerator` to validate local runtime configuration.
+- AMD ROCm/HIP support is experimental. For AMD hosts, use `.env.rocm.example`, keep `WHISPER_DEVICE=cuda`, and validate with a small file before large batches.
 - `.env` is ignored by Git and must not be committed.
 
 ## Skill Source

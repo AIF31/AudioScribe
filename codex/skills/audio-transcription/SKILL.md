@@ -7,7 +7,7 @@ description: Transcribe audio or video files with this transcription project usi
 
 ## Overview
 
-Use this repository to transcribe audio and video files. The default backend is local `SYSTRAN/faster-whisper`; the project also supports OpenAI cloud file transcription with `TRANSCRIPTION_BACKEND=openai-whisper` and an `OPENAI_API_KEY` in `.env`. Outputs are Markdown transcript files plus metadata JSON, named from the original media stem. CUDA runs must be executed outside the sandbox because sandboxed sessions can block GPU access and surface misleading CUDA initialization errors.
+Use this repository to transcribe audio and video files. The default backend is local `SYSTRAN/faster-whisper`; the project also supports OpenAI cloud file transcription with `TRANSCRIPTION_BACKEND=openai-whisper` and an `OPENAI_API_KEY` in `.env`. Outputs are Markdown transcript files plus metadata JSON, named from the original media stem. CUDA and ROCm/HIP runs must be executed outside the sandbox because sandboxed sessions can block GPU access and surface misleading initialization errors.
 
 ## Workflow
 
@@ -53,7 +53,10 @@ TRANSCRIPTION_BACKEND=openai-whisper OPENAI_WHISPER_MODEL=whisper-1 audio-transc
 - The pipeline skips existing outputs when source hash and config match.
 - `TRANSCRIPTION_BACKEND=faster-whisper` uses the local model and can use `HF_TOKEN` from `.env` when model downloads need higher Hugging Face limits.
 - `TRANSCRIPTION_BACKEND=openai-whisper` uses the OpenAI Audio Transcriptions API and requires `OPENAI_API_KEY` in `.env`. Set `OPENAI_WHISPER_MODEL=whisper-1` unless the project is updated for another supported file transcription model.
-- `audio-transcribe check-cuda` and any `WHISPER_DEVICE=cuda` local transcription run should be executed outside the sandbox.
+- Prefer `audio-transcribe check-accelerator` for local runtime validation.
+- `audio-transcribe check-cuda` remains available as a CUDA compatibility check.
+- AMD ROCm/HIP support is experimental. For AMD hosts, use `.env.rocm.example`, set `WHISPER_ACCELERATOR=rocm`, keep `WHISPER_DEVICE=cuda`, and validate with `audio-transcribe check-accelerator` plus a small file before large batches.
+- `audio-transcribe check-accelerator` and any `WHISPER_DEVICE=cuda` local transcription run should be executed outside the sandbox.
 
 ## Troubleshooting
 
