@@ -63,3 +63,5 @@ TRANSCRIPTION_BACKEND=openai-whisper OPENAI_WHISPER_MODEL=whisper-1 audio-transc
 - If CUDA library loading fails outside the sandbox, ensure the virtualenv is active and `source scripts/setup_cuda_env.sh` ran.
 - If CUDA memory fails, use `.env.cuda.low-vram.example` settings or set `WHISPER_BATCH_SIZE=4` and `WHISPER_COMPUTE_TYPE=int8_float16`.
 - If the user wants CPU fallback, copy `.env.cpu.example` to `.env` or set `WHISPER_DEVICE=cpu`, `WHISPER_COMPUTE_TYPE=int8`, and `WHISPER_BATCH_SIZE=1`.
+- CPU transcription is significantly slower than CUDA and is only recommended for short or small files. Large recordings may take hours.
+- If OpenAI cloud transcription fails with a 413 error, the file exceeds the 25 MB upload limit. Use the `faster-whisper` backend or split the media.

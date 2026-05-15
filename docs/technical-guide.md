@@ -195,4 +195,8 @@ WHISPER_COMPUTE_TYPE=int8
 WHISPER_BATCH_SIZE=1
 ```
 
+If OpenAI cloud transcription fails with a 413 error, the media file exceeds the 25 MB upload limit of the OpenAI Audio Transcriptions API (`Maximum content size limit (26214400) exceeded`). Switch to the `faster-whisper` backend for large files, or split the media into smaller segments before uploading.
+
+CPU transcription is significantly slower than CUDA and is only recommended for short or small files. Large or long recordings may take hours to complete. If you have an NVIDIA GPU available, switch to `WHISPER_DEVICE=cuda` for practical performance.
+
 The first local transcription may download the selected faster-whisper model. Later runs reuse the local cache. Use `HF_TOKEN` if unauthenticated Hugging Face downloads are slow or rate limited.

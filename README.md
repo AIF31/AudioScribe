@@ -68,7 +68,7 @@ WHISPER_DEVICE=cpu
 WHISPER_COMPUTE_TYPE=int8
 ```
 
-Use local mode when you want transcription to run on your own machine. Switch `WHISPER_DEVICE=cuda` and `WHISPER_COMPUTE_TYPE=float16` for GPU-backed runs.
+Use local mode when you want transcription to run on your own machine. Switch `WHISPER_DEVICE=cuda` and `WHISPER_COMPUTE_TYPE=float16` for GPU-backed runs. CPU mode (`WHISPER_DEVICE=cpu`) is significantly slower and only recommended for short or small files.
 
 ```env
 TRANSCRIPTION_BACKEND=openai-whisper
@@ -76,7 +76,7 @@ OPENAI_API_KEY=sk_your_openai_api_key_here
 OPENAI_WHISPER_MODEL=whisper-1
 ```
 
-Use cloud mode when you prefer an API-backed workflow. Keep real keys only in `.env`; the file is ignored by Git.
+Use cloud mode when you prefer an API-backed workflow. Keep real keys only in `.env`; the file is ignored by Git. Note: the OpenAI Audio Transcriptions API has a 25 MB file upload limit. For larger files, use the `faster-whisper` local backend.
 
 AudioScribe creates a predictable output folder for each input file:
 
