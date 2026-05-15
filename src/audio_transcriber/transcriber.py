@@ -27,6 +27,7 @@ class TranscriptResult(BaseModel):
     language_probability: float | None = None
     duration: float | None = None
     model_name: str
+    accelerator: str | None = None
     device: str
     compute_type: str
     batch_size: int
@@ -75,7 +76,7 @@ class FasterWhisperTranscriber:
 
         self.model = WhisperModel(
             settings.whisper_model_name,
-            device=settings.whisper_device,
+            device=settings.effective_whisper_device,
             compute_type=settings.whisper_compute_type,
             use_auth_token=settings.hf_token,
         )
@@ -126,6 +127,7 @@ class FasterWhisperTranscriber:
             language_probability=getattr(info, "language_probability", None),
             duration=getattr(info, "duration", None),
             model_name=self.runtime_settings.whisper_model_name,
+            accelerator=self.runtime_settings.runtime_accelerator_label,
             device=self.runtime_settings.whisper_device,
             compute_type=self.runtime_settings.whisper_compute_type,
             batch_size=self.runtime_settings.whisper_batch_size,
@@ -202,6 +204,7 @@ class OpenAIWhisperTranscriber:
             language_probability=None,
             duration=data.get("duration"),
             model_name=self.settings.openai_whisper_model,
+            accelerator="openai",
             device="openai",
             compute_type="api",
             batch_size=1,
@@ -277,6 +280,7 @@ class OpenAIRealtimeWhisperTranscriber:
             language_probability=None,
             duration=None,
             model_name=self.settings.openai_realtime_model,
+            accelerator="openai",
             device="openai",
             compute_type="realtime",
             batch_size=1,
@@ -361,12 +365,13 @@ def _decode_audio_pcm_chunks(audio_path: Path, rate: int, chunk_size: int = 32_0
 
 
 def _cpu_fallback_settings(settings: Settings, exc: Exception) -> Settings | None:
-    if settings.whisper_device != "cuda" or not settings.whisper_allow_cpu_fallback:
+    if settings.effective_whisper_device != "cuda" or not settings.whisper_allow_cpu_fallback:
         return None
-    if not _is_cuda_init_error(exc):
+    if not _is_gpu_init_error(exc):
         return None
     return settings.model_copy(
         update={
+            "whisper_accelerator": "cpu",
             "whisper_device": "cpu",
             "whisper_compute_type": "int8",
             "whisper_batch_size": 1,
@@ -374,7 +379,7 @@ def _cpu_fallback_settings(settings: Settings, exc: Exception) -> Settings | Non
     )
 
 
-def _is_cuda_init_error(exc: Exception) -> bool:
+def _is_gpu_init_error(exc: Exception) -> bool:
     message = str(exc).lower()
     patterns = (
         "cuda failed with error",
@@ -384,13 +389,36 @@ def _is_cuda_init_error(exc: Exception) -> bool:
         "cuda runtime version",
         "no cuda-capable device",
         "cuda error",
+        "hip",
+        "rocm",
+        "hipblas",
+        "rocblas",
+        "hsa",
+        "gpu memory access fault",
     )
     return any(pattern in message for pattern in patterns)
 
 
 def _model_load_error_message(settings: Settings, exc: Exception) -> str:
-    if settings.whisper_device != "cuda":
+    if settings.effective_whisper_device != "cuda":
         return f"Failed to load faster-whisper model: {exc}"
+
+    if settings.runtime_accelerator_label == "rocm":
+        return (
+            f"Failed to load faster-whisper ROCm/HIP model: {exc}\n\n"
+            "Suggested checks:\n"
+            "- Confirm your AMD GPU is supported by your installed ROCm/HIP SDK version.\n"
+            "- Run rocminfo and rocm-smi when available.\n"
+            "- Confirm a ROCm/HIP-enabled CTranslate2 wheel or source build is installed.\n"
+            "- Do not install AudioScribe with the cuda extra for ROCm.\n"
+            "- Keep WHISPER_DEVICE=cuda; CTranslate2 uses this device string for GPU execution.\n"
+            "- Try WHISPER_COMPUTE_TYPE=int8_float16 or float16.\n"
+            "- Reduce WHISPER_BATCH_SIZE to 4, 2, or 1.\n"
+            "- Automatic CPU fallback can be disabled with WHISPER_ALLOW_CPU_FALLBACK=false.\n"
+            "- As a final fallback use WHISPER_ACCELERATOR=cpu, WHISPER_DEVICE=cpu, "
+            "WHISPER_COMPUTE_TYPE=int8, WHISPER_BATCH_SIZE=1."
+        )
+
     return (
         f"Failed to load faster-whisper CUDA model: {exc}\n\n"
         "Suggested checks:\n"
@@ -400,6 +428,6 @@ def _model_load_error_message(settings: Settings, exc: Exception) -> str:
         "- Try WHISPER_COMPUTE_TYPE=int8_float16.\n"
         "- Reduce WHISPER_BATCH_SIZE to 4, 2, or 1.\n"
         "- Automatic CPU fallback can be disabled with WHISPER_ALLOW_CPU_FALLBACK=false.\n"
-        "- As a final fallback use WHISPER_DEVICE=cpu, WHISPER_COMPUTE_TYPE=int8, "
-        "WHISPER_BATCH_SIZE=1."
+        "- As a final fallback use WHISPER_ACCELERATOR=cpu, WHISPER_DEVICE=cpu, "
+        "WHISPER_COMPUTE_TYPE=int8, WHISPER_BATCH_SIZE=1."
     )
