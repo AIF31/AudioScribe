@@ -3,6 +3,7 @@ import base64
 import json
 
 from pydantic import BaseModel
+from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
 from audio_transcriber.config import (
     TRANSCRIPTION_BACKEND_FASTER_WHISPER,
@@ -10,6 +11,8 @@ from audio_transcriber.config import (
     TRANSCRIPTION_BACKEND_OPENAI_REALTIME,
     Settings,
 )
+
+OPENAI_MAX_FILE_SIZE_BYTES = 25 * 1024 * 1024
 
 
 class TranscriptSegment(BaseModel):
@@ -150,6 +153,8 @@ class OpenAIWhisperTranscriber:
     ) -> TranscriptResult:
         from openai import OpenAI
 
+        _validate_openai_audio_size(audio_path)
+
         task = self.settings.whisper_task.strip().lower()
         if task not in {"transcribe", "translate"}:
             raise ValueError(
@@ -166,16 +171,10 @@ class OpenAIWhisperTranscriber:
         if self.settings.whisper_initial_prompt:
             kwargs["prompt"] = self.settings.whisper_initial_prompt
 
-        with audio_path.open("rb") as audio_file:
-            audio_endpoint = (
-                client.audio.translations
-                if task == "translate"
-                else client.audio.transcriptions
-            )
-            transcription = audio_endpoint.create(
-                file=audio_file,
-                **kwargs,
-            )
+        try:
+            transcription = _create_openai_audio_transcription(client, audio_path, task, kwargs)
+        except Exception as exc:
+            raise RuntimeError(_openai_error_message(exc)) from exc
 
         data = (
             transcription.model_dump()
@@ -228,6 +227,7 @@ class OpenAIRealtimeWhisperTranscriber:
         source_file: Path | None = None,
     ) -> TranscriptResult:
         import websocket
+        from websocket import WebSocketTimeoutException
 
         transcript_parts: list[str] = []
         ws = websocket.create_connection(
@@ -257,7 +257,7 @@ class OpenAIRealtimeWhisperTranscriber:
                 try:
                     event = json.loads(ws.recv())
                 except Exception as exc:
-                    if transcript_parts and exc.__class__.__name__ == "WebSocketTimeoutException":
+                    if transcript_parts and isinstance(exc, WebSocketTimeoutException):
                         break
                     raise
                 event_type = event.get("type")
@@ -335,6 +335,70 @@ class OpenAIRealtimeWhisperTranscriber:
             },
             "include": ["item.input_audio_transcription.logprobs"],
         }
+
+
+def _validate_openai_audio_size(audio_path: Path) -> None:
+    file_size = audio_path.stat().st_size
+    if file_size <= OPENAI_MAX_FILE_SIZE_BYTES:
+        return
+
+    file_size_mb = file_size / (1024 * 1024)
+    max_size_mb = OPENAI_MAX_FILE_SIZE_BYTES // (1024 * 1024)
+    raise ValueError(
+        f"File size ({file_size_mb:.1f} MB) exceeds the OpenAI Audio API limit of "
+        f"{max_size_mb} MB. Use the local faster-whisper backend or compress/split the audio."
+    )
+
+
+def _is_retryable_openai_error(exc: BaseException) -> bool:
+    status_code = getattr(exc, "status_code", None)
+    if status_code in {408, 409, 429, 500, 502, 503, 504}:
+        return True
+    return exc.__class__.__name__ in {
+        "APIConnectionError",
+        "APITimeoutError",
+        "RateLimitError",
+        "InternalServerError",
+    }
+
+
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=2, max=30),
+    retry=retry_if_exception(_is_retryable_openai_error),
+    reraise=True,
+)
+def _create_openai_audio_transcription(client, audio_path: Path, task: str, kwargs: dict):
+    audio_endpoint = (
+        client.audio.translations
+        if task == "translate"
+        else client.audio.transcriptions
+    )
+    with audio_path.open("rb") as audio_file:
+        return audio_endpoint.create(
+            file=audio_file,
+            **kwargs,
+        )
+
+
+def _openai_error_message(exc: Exception) -> str:
+    status_code = getattr(exc, "status_code", None)
+    if status_code == 401 or exc.__class__.__name__ == "AuthenticationError":
+        return "OpenAI transcription failed: invalid API key. Check OPENAI_API_KEY."
+    if status_code == 413:
+        return (
+            "OpenAI transcription failed: audio file is too large for the API. "
+            "Use the local faster-whisper backend or compress/split the audio."
+        )
+    if status_code == 429 or exc.__class__.__name__ == "RateLimitError":
+        return "OpenAI transcription failed: rate limit exceeded. Try again later."
+    if status_code == 503:
+        return "OpenAI transcription failed: service unavailable. Try again later."
+    if exc.__class__.__name__ == "APITimeoutError":
+        return "OpenAI transcription failed: request timed out. Try again later."
+    if exc.__class__.__name__ == "APIConnectionError":
+        return "OpenAI transcription failed: network connection error. Check your connection."
+    return f"OpenAI transcription failed: {exc}"
 
 
 def _decode_audio_pcm_chunks(audio_path: Path, rate: int, chunk_size: int = 32_000):

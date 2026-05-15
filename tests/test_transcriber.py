@@ -5,9 +5,11 @@ import json
 from audio_transcriber.config import Settings
 from audio_transcriber.transcriber import (
     FasterWhisperTranscriber,
+    OPENAI_MAX_FILE_SIZE_BYTES,
     OpenAIRealtimeWhisperTranscriber,
     OpenAIWhisperTranscriber,
     create_transcriber,
+    _openai_error_message,
 )
 
 
@@ -297,6 +299,48 @@ def test_openai_whisper_transcriber_uses_translations_api_for_translate(monkeypa
     assert "language" not in translation_calls[0]
     assert result.full_text == "Hello world"
     assert result.segments[0].text == "Hello world"
+
+
+def test_openai_whisper_transcriber_rejects_oversized_audio_before_api_call(
+    monkeypatch,
+    tmp_path,
+):
+    class _FakeOpenAI:
+        def __init__(self, _api_key):
+            raise AssertionError("OpenAI client should not be created for oversized files")
+
+    monkeypatch.setitem(sys.modules, "openai", SimpleNamespace(OpenAI=_FakeOpenAI))
+
+    audio_path = tmp_path / "too-large.mp3"
+    with audio_path.open("wb") as audio_file:
+        audio_file.truncate(OPENAI_MAX_FILE_SIZE_BYTES + 1)
+    settings = Settings(
+        transcription_backend="openai-whisper",
+        openai_api_key="sk_test_key",
+    )
+
+    try:
+        OpenAIWhisperTranscriber(settings).transcribe_file(audio_path)
+    except ValueError as exc:
+        assert "exceeds the OpenAI Audio API limit of 25 MB" in str(exc)
+    else:
+        raise AssertionError("Expected oversized OpenAI audio file to be rejected")
+
+
+def test_openai_error_message_maps_common_api_failures():
+    class _OpenAIError(Exception):
+        def __init__(self, status_code=None):
+            super().__init__("api failed")
+            self.status_code = status_code
+
+    _OpenAIError.__name__ = "RateLimitError"
+    assert "rate limit exceeded" in _openai_error_message(_OpenAIError(429))
+
+    auth_error = type("AuthenticationError", (Exception,), {})("bad key")
+    assert "invalid API key" in _openai_error_message(auth_error)
+
+    timeout_error = type("APITimeoutError", (Exception,), {})("timeout")
+    assert "request timed out" in _openai_error_message(timeout_error)
 
 
 def test_openai_realtime_transcriber_sends_session_and_audio(monkeypatch, tmp_path):
