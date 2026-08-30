@@ -13,6 +13,8 @@ def test_default_settings_are_cuda_first(monkeypatch):
         "WHISPER_BATCH_SIZE",
         "WHISPER_INITIAL_PROMPT",
         "HF_TOKEN",
+        "DIARIZATION_MODEL",
+        "DIARIZATION_DEVICE",
         "OPENAI_API_KEY",
         "OPENAI_WHISPER_MODEL",
         "OPENAI_REALTIME_MODEL",
@@ -30,6 +32,8 @@ def test_default_settings_are_cuda_first(monkeypatch):
     assert settings.whisper_allow_cpu_fallback is True
     assert settings.whisper_initial_prompt is None
     assert settings.hf_token is None
+    assert settings.diarization_model == "pyannote/speaker-diarization-3.1"
+    assert settings.diarization_device == "cuda"
     assert settings.openai_api_key is None
     assert settings.openai_whisper_model == "whisper-1"
     assert settings.openai_realtime_model == "gpt-realtime-whisper"

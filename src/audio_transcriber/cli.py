@@ -7,6 +7,12 @@ from rich.table import Table
 from audio_transcriber.audio import discover_media_files
 from audio_transcriber.config import Settings, get_settings
 from audio_transcriber.cuda_check import check_cuda
+from audio_transcriber.diarizer import (
+    assign_speakers,
+    export_diarized,
+    parse_transcript,
+    run_diarization,
+)
 from audio_transcriber.exporters import export_all, format_timestamp
 from audio_transcriber.hashing import file_sha256
 from audio_transcriber.skip import should_skip_existing
@@ -76,6 +82,58 @@ def transcribe_batch(
 
     output_root.mkdir(parents=True, exist_ok=True)
     _transcribe_files(files, output_root, settings)
+
+
+@app.command("diarize-file")
+def diarize_file(
+    media_path: Path = typer.Argument(..., exists=True, file_okay=True, dir_okay=False),
+    output_dir: Path | None = typer.Option(None, "--output-dir", "-o"),
+    transcript_path: Path | None = typer.Option(None, "--transcript"),
+    num_speakers: int | None = typer.Option(None, "--num-speakers", min=1),
+    min_speakers: int | None = typer.Option(None, "--min-speakers", min=1),
+    max_speakers: int | None = typer.Option(None, "--max-speakers", min=1),
+) -> None:
+    """Add local pyannote speaker labels to an existing transcript."""
+    settings = get_settings()
+    if not settings.hf_token:
+        raise typer.BadParameter("HF_TOKEN is required for pyannote diarization")
+    if num_speakers is not None and (min_speakers is not None or max_speakers is not None):
+        raise typer.BadParameter(
+            "--num-speakers cannot be combined with --min-speakers or --max-speakers"
+        )
+    if min_speakers is not None and max_speakers is not None and min_speakers > max_speakers:
+        raise typer.BadParameter("--min-speakers cannot exceed --max-speakers")
+
+    output_root = output_dir or settings.transcripts_output_dir
+    file_output_dir = output_root / media_path.stem
+    source_transcript = transcript_path or file_output_dir / f"{media_path.stem}_transcript.md"
+    if not source_transcript.exists():
+        raise typer.BadParameter(f"Transcript not found: {source_transcript}")
+
+    console.print(f"Decoding and diarizing [bold]{media_path.name}[/bold]...")
+    turns = run_diarization(
+        media_path,
+        model_name=settings.diarization_model,
+        token=settings.hf_token,
+        device=settings.diarization_device,
+        num_speakers=num_speakers,
+        min_speakers=min_speakers,
+        max_speakers=max_speakers,
+    )
+    segments = assign_speakers(parse_transcript(source_transcript), turns)
+    markdown_path, metadata_path = export_diarized(
+        media_path,
+        source_transcript,
+        file_output_dir,
+        segments,
+        turns,
+        settings.diarization_model,
+        settings.diarization_device,
+    )
+    console.print(
+        f"Wrote {markdown_path} and {metadata_path} "
+        f"({len(set(turn.speaker for turn in turns))} speakers)"
+    )
 
 
 def main() -> None:

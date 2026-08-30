@@ -50,7 +50,12 @@ def test_export_md(tmp_path):
 
 
 def test_export_metadata(tmp_path):
-    output = export_metadata(sample_result(), tmp_path, Settings())
+    settings = Settings(
+        whisper_device="cuda",
+        whisper_compute_type="float16",
+        whisper_batch_size=8,
+    )
+    output = export_metadata(sample_result(), tmp_path, settings)
     metadata = json.loads(output.read_text(encoding="utf-8"))
 
     assert output.name == "sample_001_metadata.json"

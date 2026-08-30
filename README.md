@@ -32,6 +32,7 @@ AudioScribe turns recordings into clean Markdown transcripts and metadata files.
 - **Local-first by default**: use `faster-whisper` on CPU or CUDA without sending media to an external service.
 - **Cloud when you want it**: switch to OpenAI transcription with one `.env` setting and an API key.
 - **Batch-friendly outputs**: transcribe a file or a folder and get one organized output directory per source file.
+- **Optional local speaker labels**: post-process timestamped transcripts with pyannote.audio diarization.
 - **Reproducible skips**: completed transcripts are skipped when the source hash and transcription settings still match.
 - **Codex-ready**: includes an installable Codex skill so agents can use the project after a fresh clone.
 - **Common formats**: supports `.mp3`, `.m4a`, `.wav`, `.mp4`, `.mov`, `.webm`, `.ogg`, `.flac`, and `.aac`.
@@ -101,6 +102,11 @@ audio-transcribe transcribe-file ./data/audio_raw/example.m4a
 audio-transcribe transcribe-batch \
   --input-dir ./data/audio_raw \
   --output-dir ./data/transcripts
+
+# Add local speaker labels to an existing transcript
+audio-transcribe diarize-file ./data/audio_raw/meeting.mp4 \
+  --min-speakers 2 \
+  --max-speakers 4
 ```
 
 ## Codex Skill
@@ -116,6 +122,7 @@ After restarting Codex, use the `audio-transcription` skill to transcribe audio 
 ## Documentation
 
 - [Technical guide](docs/technical-guide.md): CUDA setup, realtime settings, configuration reference, and troubleshooting.
+- [Local speaker diarization](docs/diarization.md): pyannote setup, usage, outputs, and speaker-count guidance.
 - [Codex skill guide](docs/codex-skill.md): installing and using the bundled Codex skill.
 - [.env.example](.env.example): documented configuration template with safe placeholder values.
 

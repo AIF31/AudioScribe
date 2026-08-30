@@ -11,6 +11,10 @@ This document captures the lower-level configuration and operational details for
 
 Faster-whisper decodes audio through PyAV, so system FFmpeg is not required for the default file transcription pipeline.
 
+Local speaker labeling is available as an optional post-processing step. See
+[Local Speaker Diarization](diarization.md) for its pinned dependencies, gated model access, and
+commands.
+
 If you run this project from a sandboxed agent session, CUDA checks and CUDA transcription commands should be executed outside the sandbox. Sandboxed sessions can block GPU access and surface misleading CUDA initialization errors even when the host NVIDIA/WSL setup is healthy.
 
 ## Install

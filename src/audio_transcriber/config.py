@@ -56,6 +56,14 @@ class Settings(BaseModel):
         default_factory=lambda: os.getenv("WHISPER_INITIAL_PROMPT") or None
     )
     hf_token: str | None = Field(default_factory=lambda: os.getenv("HF_TOKEN") or None)
+    diarization_model: str = Field(
+        default_factory=lambda: os.getenv(
+            "DIARIZATION_MODEL", "pyannote/speaker-diarization-3.1"
+        )
+    )
+    diarization_device: str = Field(
+        default_factory=lambda: os.getenv("DIARIZATION_DEVICE", "cuda")
+    )
     openai_api_key: str | None = Field(
         default_factory=lambda: os.getenv("OPENAI_API_KEY") or None
     )

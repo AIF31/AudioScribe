@@ -27,6 +27,12 @@ cuda = [
     "nvidia-cublas-cu12; platform_system == 'Linux'",
     "nvidia-cudnn-cu12==9.*; platform_system == 'Linux'",
 ]
+diarize = [
+    "torch==2.4.1",
+    "torchaudio==2.4.1",
+    "pyannote.audio==3.3.1",
+    "huggingface-hub==0.27.1",
+]
 
 [project.scripts]
 audio-transcribe = "audio_transcriber.cli:app"
