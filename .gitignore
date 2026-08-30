@@ -11,6 +11,7 @@ dist/
 AGENTS.md
 data/audio_raw/**
 data/transcripts/**
+data/comparison/**
 !data/audio_raw/.gitkeep
 !data/transcripts/.gitkeep
 *:Zone.Identifier
