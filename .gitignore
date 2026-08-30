@@ -8,6 +8,7 @@ build/
 dist/
 .env
 .codex
+AGENTS.md
 data/audio_raw/**
 data/transcripts/**
 !data/audio_raw/.gitkeep

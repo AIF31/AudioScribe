@@ -15,6 +15,17 @@ TRANSCRIPTION_BACKENDS = {
     TRANSCRIPTION_BACKEND_OPENAI_REALTIME,
 }
 
+WHISPER_ACCELERATOR_AUTO = "auto"
+WHISPER_ACCELERATOR_CPU = "cpu"
+WHISPER_ACCELERATOR_CUDA = "cuda"
+WHISPER_ACCELERATOR_ROCM = "rocm"
+WHISPER_ACCELERATORS = {
+    WHISPER_ACCELERATOR_AUTO,
+    WHISPER_ACCELERATOR_CPU,
+    WHISPER_ACCELERATOR_CUDA,
+    WHISPER_ACCELERATOR_ROCM,
+}
+
 
 def env_bool(name: str, default: str = "false") -> bool:
     return os.getenv(name, default).strip().lower() in {"1", "true", "yes", "y", "on"}
@@ -41,6 +52,14 @@ class Settings(BaseModel):
     )
     whisper_model_name: str = Field(
         default_factory=lambda: os.getenv("WHISPER_MODEL_NAME", "large-v3")
+    )
+    whisper_accelerator: str = Field(
+        default_factory=lambda: os.getenv(
+            "WHISPER_ACCELERATOR",
+            WHISPER_ACCELERATOR_AUTO,
+        )
+        .strip()
+        .lower()
     )
     whisper_device: str = Field(default_factory=lambda: os.getenv("WHISPER_DEVICE", "cuda"))
     whisper_compute_type: str = Field(
@@ -121,6 +140,25 @@ class Settings(BaseModel):
         if self.transcription_backend not in TRANSCRIPTION_BACKENDS:
             valid = ", ".join(sorted(TRANSCRIPTION_BACKENDS))
             raise ValueError(f"TRANSCRIPTION_BACKEND must be one of: {valid}")
+        if self.whisper_accelerator not in WHISPER_ACCELERATORS:
+            valid = ", ".join(sorted(WHISPER_ACCELERATORS))
+            raise ValueError(f"WHISPER_ACCELERATOR must be one of: {valid}")
+        if self.transcription_backend == TRANSCRIPTION_BACKEND_FASTER_WHISPER:
+            if (
+                self.whisper_accelerator == WHISPER_ACCELERATOR_CPU
+                and self.whisper_device != "cpu"
+            ):
+                raise ValueError("WHISPER_ACCELERATOR=cpu requires WHISPER_DEVICE=cpu")
+            if (
+                self.whisper_accelerator
+                in {WHISPER_ACCELERATOR_CUDA, WHISPER_ACCELERATOR_ROCM}
+                and self.whisper_device != "cuda"
+            ):
+                raise ValueError(
+                    f"WHISPER_ACCELERATOR={self.whisper_accelerator} requires "
+                    "WHISPER_DEVICE=cuda because CTranslate2 uses device='cuda' "
+                    "for GPU execution."
+                )
         if (
             self.transcription_backend
             in {TRANSCRIPTION_BACKEND_OPENAI_WHISPER, TRANSCRIPTION_BACKEND_OPENAI_REALTIME}
@@ -131,6 +169,27 @@ class Settings(BaseModel):
                 f"TRANSCRIPTION_BACKEND={self.transcription_backend}"
             )
         return self
+
+    @property
+    def effective_whisper_device(self) -> str:
+        """Device string passed to faster-whisper/CTranslate2."""
+        if self.whisper_accelerator == WHISPER_ACCELERATOR_CPU:
+            return "cpu"
+        if self.whisper_accelerator in {
+            WHISPER_ACCELERATOR_CUDA,
+            WHISPER_ACCELERATOR_ROCM,
+        }:
+            return "cuda"
+        return self.whisper_device
+
+    @property
+    def runtime_accelerator_label(self) -> str:
+        """Human-facing accelerator label for CLI output and metadata."""
+        if self.whisper_accelerator != WHISPER_ACCELERATOR_AUTO:
+            return self.whisper_accelerator
+        if self.whisper_device == "cpu":
+            return WHISPER_ACCELERATOR_CPU
+        return WHISPER_ACCELERATOR_CUDA
 
 
 def get_settings() -> Settings:

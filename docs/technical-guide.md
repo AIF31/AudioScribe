@@ -5,8 +5,11 @@ This document captures the lower-level configuration and operational details for
 ## Requirements
 
 - Python 3.10, 3.11, or 3.12
+- No GPU runtime for CPU mode
 - NVIDIA GPU and visible `nvidia-smi` for CUDA mode
-- CUDA 12 cuBLAS and cuDNN 9 runtime libraries for faster-whisper/CTranslate2
+- CUDA 12 cuBLAS and cuDNN 9 runtime libraries for NVIDIA faster-whisper/CTranslate2
+- AMD GPU supported by the installed ROCm/HIP SDK/runtime for experimental ROCm/HIP mode
+- CTranslate2 >= 4.7.1 from a ROCm/HIP wheel or source build with `-DWITH_HIP=ON` for AMD GPU mode
 - OpenAI API key only when using `TRANSCRIPTION_BACKEND=openai-whisper` or `TRANSCRIPTION_BACKEND=openai-realtime-whisper`
 
 Faster-whisper decodes audio through PyAV, so system FFmpeg is not required for the default file transcription pipeline.
@@ -15,34 +18,40 @@ Local speaker labeling is available as an optional post-processing step. See
 [Local Speaker Diarization](diarization.md) for its pinned dependencies, gated model access, and
 commands.
 
-If you run this project from a sandboxed agent session, CUDA checks and CUDA transcription commands should be executed outside the sandbox. Sandboxed sessions can block GPU access and surface misleading CUDA initialization errors even when the host NVIDIA/WSL setup is healthy.
+If you run this project from a sandboxed agent session, GPU checks and GPU transcription commands should be executed outside the sandbox. Sandboxed sessions can block GPU access and surface misleading CUDA, HIP, or ROCm initialization errors even when the host setup is healthy.
+
+ROCm/HIP support is experimental. For AMD GPU mode, set `WHISPER_ACCELERATOR=rocm` and keep `WHISPER_DEVICE=cuda`; CTranslate2/faster-whisper still use `device="cuda"` for GPU execution on ROCm builds. Validate AMD GPU runs with a small file before using large batches.
 
 ## Install
+
+Base CPU/OpenAI install:
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
+python -m pip install -e ".[dev]"
+cp .env.example .env
+```
+
+NVIDIA CUDA install:
+
+```bash
 python -m pip install -e ".[dev,cuda]"
-cp .env.example .env
 source scripts/setup_cuda_env.sh
+cp .env.cuda.low-vram.example .env
+audio-transcribe check-accelerator
 ```
 
-If you use `uv`:
+AMD ROCm/HIP install:
 
 ```bash
-uv venv
-source .venv/bin/activate
-uv pip install -e ".[dev,cuda]"
-cp .env.example .env
-source scripts/setup_cuda_env.sh
+python -m pip install -e ".[dev]"
+# Install a ROCm/HIP-enabled CTranslate2 wheel or build CTranslate2 with -DWITH_HIP=ON.
+cp .env.rocm.example .env
+audio-transcribe check-accelerator
 ```
 
-The CUDA library helper uses the NVIDIA Python wheels:
-
-```bash
-python -m pip install nvidia-cublas-cu12 nvidia-cudnn-cu12==9.*
-source scripts/setup_cuda_env.sh
-```
+Do not install `.[cuda]` for AMD GPUs. That extra installs NVIDIA libraries only.
 
 ## Configuration
 
@@ -51,10 +60,22 @@ Local faster-whisper is the default backend:
 ```env
 TRANSCRIPTION_BACKEND=faster-whisper
 WHISPER_MODEL_NAME=large-v3
+WHISPER_ACCELERATOR=auto
 WHISPER_DEVICE=cuda
 WHISPER_COMPUTE_TYPE=float16
 HF_TOKEN=hf_your_token_here
 ```
+
+Accelerator settings:
+
+| Setting | Meaning |
+|---|---|
+| `WHISPER_ACCELERATOR=auto` | Default label. Uses `WHISPER_DEVICE` to infer CPU or CUDA-style GPU metadata. |
+| `WHISPER_ACCELERATOR=cpu` | CPU-only local transcription; requires `WHISPER_DEVICE=cpu` for `faster-whisper`. |
+| `WHISPER_ACCELERATOR=cuda` | NVIDIA CUDA local transcription; requires `WHISPER_DEVICE=cuda`. |
+| `WHISPER_ACCELERATOR=rocm` | AMD ROCm/HIP local transcription; requires `WHISPER_DEVICE=cuda` because CTranslate2 uses `cuda` as the GPU device string. |
+
+OpenAI backends ignore local accelerator/device compatibility because no local faster-whisper model is loaded.
 
 OpenAI cloud file mode uses the OpenAI Audio API:
 
@@ -87,13 +108,19 @@ Check configuration:
 audio-transcribe inspect-config
 ```
 
-Check CUDA:
+Check the configured accelerator:
+
+```bash
+audio-transcribe check-accelerator
+```
+
+Run `audio-transcribe check-accelerator` outside the sandbox if you want to validate real GPU availability. For ROCm/HIP, this command checks CTranslate2 version, GPU count when available, ROCm/HIP diagnostic tools, and whether faster-whisper can load a tiny GPU model.
+
+Legacy CUDA-only check:
 
 ```bash
 audio-transcribe check-cuda
 ```
-
-Run `audio-transcribe check-cuda` outside the sandbox if you want to validate real GPU availability.
 
 Transcribe one file:
 
@@ -127,7 +154,21 @@ data/transcripts/sample/
   sample_metadata.json
 ```
 
-`<original_file_name>_transcript.md` is the human-readable transcript with segment timestamps when the backend provides them. `<original_file_name>_metadata.json` records source hash, backend, model, device, compute type, batch size, language, VAD settings, and segment count. Existing outputs are skipped only when both files exist and the source hash plus transcription configuration still match.
+`<original_file_name>_transcript.md` is the human-readable transcript with segment timestamps when the backend provides them. `<original_file_name>_metadata.json` records source hash, backend, model, accelerator, device, compute type, batch size, language, VAD settings, and segment count. Existing outputs are skipped only when both files exist and the source hash plus transcription configuration still match.
+
+For a successful AMD GPU run, metadata should include:
+
+```json
+{
+  "requested_accelerator": "rocm",
+  "requested_device": "cuda",
+  "effective_device": "cuda",
+  "accelerator": "rocm",
+  "device": "cuda"
+}
+```
+
+If `accelerator` is `cpu`, the run used CPU fallback instead of the AMD GPU.
 
 ## Model Settings
 
@@ -135,6 +176,7 @@ Default CUDA quality mode:
 
 ```env
 WHISPER_MODEL_NAME=large-v3
+WHISPER_ACCELERATOR=auto
 WHISPER_DEVICE=cuda
 WHISPER_COMPUTE_TYPE=float16
 WHISPER_BATCH_SIZE=8
@@ -151,6 +193,21 @@ CPU fallback:
 ```bash
 cp .env.cpu.example .env
 ```
+
+Experimental AMD ROCm/HIP mode:
+
+```bash
+cp .env.rocm.example .env
+audio-transcribe check-accelerator
+```
+
+For a strict AMD GPU smoke test, temporarily set:
+
+```env
+WHISPER_ALLOW_CPU_FALLBACK=false
+```
+
+This makes ROCm initialization failures explicit instead of silently completing on CPU.
 
 Language is detected automatically by default:
 
@@ -194,9 +251,16 @@ WHISPER_BATCH_SIZE=2
 or use CPU fallback:
 
 ```env
+WHISPER_ACCELERATOR=cpu
 WHISPER_DEVICE=cpu
 WHISPER_COMPUTE_TYPE=int8
 WHISPER_BATCH_SIZE=1
 ```
+
+If ROCm/HIP fails, confirm your AMD GPU is supported by the installed ROCm/HIP runtime, run `rocminfo`, `rocm-smi`, `amd-smi`, or `hipcc --version` when available, and confirm the installed CTranslate2 package is a ROCm/HIP-enabled wheel or source build. Do not install `.[cuda]` for AMD GPUs.
+
+If OpenAI cloud transcription fails with a 413 error, the media file exceeds the 25 MB upload limit of the OpenAI Audio Transcriptions API (`Maximum content size limit (26214400) exceeded`). Switch to the `faster-whisper` backend for large files, or split the media into smaller segments before uploading.
+
+CPU transcription is significantly slower than CUDA and is only recommended for short or small files. Large or long recordings may take hours to complete. If you have an NVIDIA GPU available, switch to `WHISPER_DEVICE=cuda` for practical performance.
 
 The first local transcription may download the selected faster-whisper model. Later runs reuse the local cache. Use `HF_TOKEN` if unauthenticated Hugging Face downloads are slow or rate limited.

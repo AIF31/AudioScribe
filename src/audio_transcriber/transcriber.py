@@ -3,6 +3,7 @@ import base64
 import json
 
 from pydantic import BaseModel
+from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
 from audio_transcriber.config import (
     TRANSCRIPTION_BACKEND_FASTER_WHISPER,
@@ -10,6 +11,8 @@ from audio_transcriber.config import (
     TRANSCRIPTION_BACKEND_OPENAI_REALTIME,
     Settings,
 )
+
+OPENAI_MAX_FILE_SIZE_BYTES = 25 * 1024 * 1024
 
 
 class TranscriptSegment(BaseModel):
@@ -27,6 +30,7 @@ class TranscriptResult(BaseModel):
     language_probability: float | None = None
     duration: float | None = None
     model_name: str
+    accelerator: str | None = None
     device: str
     compute_type: str
     batch_size: int
@@ -75,7 +79,7 @@ class FasterWhisperTranscriber:
 
         self.model = WhisperModel(
             settings.whisper_model_name,
-            device=settings.whisper_device,
+            device=settings.effective_whisper_device,
             compute_type=settings.whisper_compute_type,
             use_auth_token=settings.hf_token,
         )
@@ -126,6 +130,7 @@ class FasterWhisperTranscriber:
             language_probability=getattr(info, "language_probability", None),
             duration=getattr(info, "duration", None),
             model_name=self.runtime_settings.whisper_model_name,
+            accelerator=self.runtime_settings.runtime_accelerator_label,
             device=self.runtime_settings.whisper_device,
             compute_type=self.runtime_settings.whisper_compute_type,
             batch_size=self.runtime_settings.whisper_batch_size,
@@ -148,6 +153,8 @@ class OpenAIWhisperTranscriber:
     ) -> TranscriptResult:
         from openai import OpenAI
 
+        _validate_openai_audio_size(audio_path)
+
         task = self.settings.whisper_task.strip().lower()
         if task not in {"transcribe", "translate"}:
             raise ValueError(
@@ -164,16 +171,10 @@ class OpenAIWhisperTranscriber:
         if self.settings.whisper_initial_prompt:
             kwargs["prompt"] = self.settings.whisper_initial_prompt
 
-        with audio_path.open("rb") as audio_file:
-            audio_endpoint = (
-                client.audio.translations
-                if task == "translate"
-                else client.audio.transcriptions
-            )
-            transcription = audio_endpoint.create(
-                file=audio_file,
-                **kwargs,
-            )
+        try:
+            transcription = _create_openai_audio_transcription(client, audio_path, task, kwargs)
+        except Exception as exc:
+            raise RuntimeError(_openai_error_message(exc)) from exc
 
         data = (
             transcription.model_dump()
@@ -202,6 +203,7 @@ class OpenAIWhisperTranscriber:
             language_probability=None,
             duration=data.get("duration"),
             model_name=self.settings.openai_whisper_model,
+            accelerator="openai",
             device="openai",
             compute_type="api",
             batch_size=1,
@@ -225,6 +227,7 @@ class OpenAIRealtimeWhisperTranscriber:
         source_file: Path | None = None,
     ) -> TranscriptResult:
         import websocket
+        from websocket import WebSocketTimeoutException
 
         transcript_parts: list[str] = []
         ws = websocket.create_connection(
@@ -254,7 +257,7 @@ class OpenAIRealtimeWhisperTranscriber:
                 try:
                     event = json.loads(ws.recv())
                 except Exception as exc:
-                    if transcript_parts and exc.__class__.__name__ == "WebSocketTimeoutException":
+                    if transcript_parts and isinstance(exc, WebSocketTimeoutException):
                         break
                     raise
                 event_type = event.get("type")
@@ -277,6 +280,7 @@ class OpenAIRealtimeWhisperTranscriber:
             language_probability=None,
             duration=None,
             model_name=self.settings.openai_realtime_model,
+            accelerator="openai",
             device="openai",
             compute_type="realtime",
             batch_size=1,
@@ -337,6 +341,70 @@ class OpenAIRealtimeWhisperTranscriber:
         }
 
 
+def _validate_openai_audio_size(audio_path: Path) -> None:
+    file_size = audio_path.stat().st_size
+    if file_size <= OPENAI_MAX_FILE_SIZE_BYTES:
+        return
+
+    file_size_mb = file_size / (1024 * 1024)
+    max_size_mb = OPENAI_MAX_FILE_SIZE_BYTES // (1024 * 1024)
+    raise ValueError(
+        f"File size ({file_size_mb:.1f} MB) exceeds the OpenAI Audio API limit of "
+        f"{max_size_mb} MB. Use the local faster-whisper backend or compress/split the audio."
+    )
+
+
+def _is_retryable_openai_error(exc: BaseException) -> bool:
+    status_code = getattr(exc, "status_code", None)
+    if status_code in {408, 409, 429, 500, 502, 503, 504}:
+        return True
+    return exc.__class__.__name__ in {
+        "APIConnectionError",
+        "APITimeoutError",
+        "RateLimitError",
+        "InternalServerError",
+    }
+
+
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=2, max=30),
+    retry=retry_if_exception(_is_retryable_openai_error),
+    reraise=True,
+)
+def _create_openai_audio_transcription(client, audio_path: Path, task: str, kwargs: dict):
+    audio_endpoint = (
+        client.audio.translations
+        if task == "translate"
+        else client.audio.transcriptions
+    )
+    with audio_path.open("rb") as audio_file:
+        return audio_endpoint.create(
+            file=audio_file,
+            **kwargs,
+        )
+
+
+def _openai_error_message(exc: Exception) -> str:
+    status_code = getattr(exc, "status_code", None)
+    if status_code == 401 or exc.__class__.__name__ == "AuthenticationError":
+        return "OpenAI transcription failed: invalid API key. Check OPENAI_API_KEY."
+    if status_code == 413:
+        return (
+            "OpenAI transcription failed: audio file is too large for the API. "
+            "Use the local faster-whisper backend or compress/split the audio."
+        )
+    if status_code == 429 or exc.__class__.__name__ == "RateLimitError":
+        return "OpenAI transcription failed: rate limit exceeded. Try again later."
+    if status_code == 503:
+        return "OpenAI transcription failed: service unavailable. Try again later."
+    if exc.__class__.__name__ == "APITimeoutError":
+        return "OpenAI transcription failed: request timed out. Try again later."
+    if exc.__class__.__name__ == "APIConnectionError":
+        return "OpenAI transcription failed: network connection error. Check your connection."
+    return f"OpenAI transcription failed: {exc}"
+
+
 def _decode_audio_pcm_chunks(audio_path: Path, rate: int, chunk_size: int = 32_000):
     import av
 
@@ -365,12 +433,13 @@ def _decode_audio_pcm_chunks(audio_path: Path, rate: int, chunk_size: int = 32_0
 
 
 def _cpu_fallback_settings(settings: Settings, exc: Exception) -> Settings | None:
-    if settings.whisper_device != "cuda" or not settings.whisper_allow_cpu_fallback:
+    if settings.effective_whisper_device != "cuda" or not settings.whisper_allow_cpu_fallback:
         return None
-    if not _is_cuda_init_error(exc):
+    if not _is_gpu_init_error(exc):
         return None
     return settings.model_copy(
         update={
+            "whisper_accelerator": "cpu",
             "whisper_device": "cpu",
             "whisper_compute_type": "int8",
             "whisper_batch_size": 1,
@@ -378,7 +447,7 @@ def _cpu_fallback_settings(settings: Settings, exc: Exception) -> Settings | Non
     )
 
 
-def _is_cuda_init_error(exc: Exception) -> bool:
+def _is_gpu_init_error(exc: Exception) -> bool:
     message = str(exc).lower()
     patterns = (
         "cuda failed with error",
@@ -388,13 +457,36 @@ def _is_cuda_init_error(exc: Exception) -> bool:
         "cuda runtime version",
         "no cuda-capable device",
         "cuda error",
+        "hip",
+        "rocm",
+        "hipblas",
+        "rocblas",
+        "hsa",
+        "gpu memory access fault",
     )
     return any(pattern in message for pattern in patterns)
 
 
 def _model_load_error_message(settings: Settings, exc: Exception) -> str:
-    if settings.whisper_device != "cuda":
+    if settings.effective_whisper_device != "cuda":
         return f"Failed to load faster-whisper model: {exc}"
+
+    if settings.runtime_accelerator_label == "rocm":
+        return (
+            f"Failed to load faster-whisper ROCm/HIP model: {exc}\n\n"
+            "Suggested checks:\n"
+            "- Confirm your AMD GPU is supported by your installed ROCm/HIP SDK version.\n"
+            "- Run rocminfo and rocm-smi when available.\n"
+            "- Confirm a ROCm/HIP-enabled CTranslate2 wheel or source build is installed.\n"
+            "- Do not install AudioScribe with the cuda extra for ROCm.\n"
+            "- Keep WHISPER_DEVICE=cuda; CTranslate2 uses this device string for GPU execution.\n"
+            "- Try WHISPER_COMPUTE_TYPE=int8_float16 or float16.\n"
+            "- Reduce WHISPER_BATCH_SIZE to 4, 2, or 1.\n"
+            "- Automatic CPU fallback can be disabled with WHISPER_ALLOW_CPU_FALLBACK=false.\n"
+            "- As a final fallback use WHISPER_ACCELERATOR=cpu, WHISPER_DEVICE=cpu, "
+            "WHISPER_COMPUTE_TYPE=int8, WHISPER_BATCH_SIZE=1."
+        )
+
     return (
         f"Failed to load faster-whisper CUDA model: {exc}\n\n"
         "Suggested checks:\n"
@@ -404,6 +496,6 @@ def _model_load_error_message(settings: Settings, exc: Exception) -> str:
         "- Try WHISPER_COMPUTE_TYPE=int8_float16.\n"
         "- Reduce WHISPER_BATCH_SIZE to 4, 2, or 1.\n"
         "- Automatic CPU fallback can be disabled with WHISPER_ALLOW_CPU_FALLBACK=false.\n"
-        "- As a final fallback use WHISPER_DEVICE=cpu, WHISPER_COMPUTE_TYPE=int8, "
-        "WHISPER_BATCH_SIZE=1."
+        "- As a final fallback use WHISPER_ACCELERATOR=cpu, WHISPER_DEVICE=cpu, "
+        "WHISPER_COMPUTE_TYPE=int8, WHISPER_BATCH_SIZE=1."
     )

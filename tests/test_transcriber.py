@@ -5,9 +5,11 @@ import json
 from audio_transcriber.config import Settings
 from audio_transcriber.transcriber import (
     FasterWhisperTranscriber,
+    OPENAI_MAX_FILE_SIZE_BYTES,
     OpenAIRealtimeWhisperTranscriber,
     OpenAIWhisperTranscriber,
     create_transcriber,
+    _openai_error_message,
 )
 
 
@@ -52,11 +54,13 @@ def test_transcriber_falls_back_to_cpu_for_cuda_init_errors(monkeypatch, tmp_pat
     transcriber = FasterWhisperTranscriber(settings)
     result = transcriber.transcribe_file(tmp_path / "sample.mp3")
 
+    assert transcriber.runtime_settings.whisper_accelerator == "cpu"
     assert transcriber.runtime_settings.whisper_device == "cpu"
     assert transcriber.runtime_settings.whisper_compute_type == "int8"
     assert transcriber.runtime_settings.whisper_batch_size == 1
     assert transcriber.fallback_reason is not None
     assert result.device == "cpu"
+    assert result.accelerator == "cpu"
     assert result.compute_type == "int8"
     assert result.batch_size == 1
 
@@ -78,6 +82,99 @@ def test_transcriber_keeps_cuda_error_when_fallback_disabled(monkeypatch):
         assert "Failed to load faster-whisper CUDA model" in str(exc)
     else:
         raise AssertionError("Expected CUDA initialization failure")
+
+
+def test_transcriber_passes_cuda_device_for_rocm(monkeypatch, tmp_path):
+    calls = []
+
+    class _RocmFakeModel:
+        def __init__(self, model_name: str, device: str, compute_type: str, use_auth_token=None):
+            calls.append(
+                {
+                    "model_name": model_name,
+                    "device": device,
+                    "compute_type": compute_type,
+                    "use_auth_token": use_auth_token,
+                }
+            )
+
+        def transcribe(self, _audio_path: str, **_kwargs):
+            return [_FakeSegment(0.0, 1.0, "Hola")], SimpleNamespace(
+                language="es",
+                language_probability=0.99,
+                duration=1.0,
+            )
+
+    fake_module = SimpleNamespace(
+        WhisperModel=_RocmFakeModel,
+        BatchedInferencePipeline=_FakePipeline,
+    )
+    monkeypatch.setitem(sys.modules, "faster_whisper", fake_module)
+
+    settings = Settings(
+        whisper_accelerator="rocm",
+        whisper_device="cuda",
+        whisper_batch_size=1,
+    )
+    result = FasterWhisperTranscriber(settings).transcribe_file(tmp_path / "sample.mp3")
+
+    assert calls[0]["device"] == "cuda"
+    assert result.accelerator == "rocm"
+    assert result.device == "cuda"
+
+
+def test_transcriber_falls_back_to_cpu_for_rocm_init_errors(monkeypatch, tmp_path):
+    class _RocmFailingModel:
+        def __init__(self, _model_name: str, device: str, compute_type: str, use_auth_token=None):
+            if device == "cuda":
+                raise RuntimeError("hipblas failed to initialize")
+
+        def transcribe(self, _audio_path: str, **_kwargs):
+            return [_FakeSegment(0.0, 1.0, "Hola")], SimpleNamespace(
+                language="es",
+                language_probability=0.99,
+                duration=1.0,
+            )
+
+    fake_module = SimpleNamespace(
+        WhisperModel=_RocmFailingModel,
+        BatchedInferencePipeline=_FakePipeline,
+    )
+    monkeypatch.setitem(sys.modules, "faster_whisper", fake_module)
+
+    settings = Settings(whisper_accelerator="rocm", whisper_device="cuda")
+    transcriber = FasterWhisperTranscriber(settings)
+    result = transcriber.transcribe_file(tmp_path / "sample.mp3")
+
+    assert transcriber.runtime_settings.whisper_accelerator == "cpu"
+    assert transcriber.runtime_settings.whisper_device == "cpu"
+    assert result.accelerator == "cpu"
+
+
+def test_transcriber_keeps_rocm_error_when_fallback_disabled(monkeypatch):
+    class _RocmFailingModel:
+        def __init__(self, _model_name: str, device: str, compute_type: str, use_auth_token=None):
+            if device == "cuda":
+                raise RuntimeError("rocblas failed to initialize")
+
+    fake_module = SimpleNamespace(
+        WhisperModel=_RocmFailingModel,
+        BatchedInferencePipeline=_FakePipeline,
+    )
+    monkeypatch.setitem(sys.modules, "faster_whisper", fake_module)
+
+    settings = Settings(
+        whisper_accelerator="rocm",
+        whisper_device="cuda",
+        whisper_allow_cpu_fallback=False,
+    )
+
+    try:
+        FasterWhisperTranscriber(settings)
+    except RuntimeError as exc:
+        assert "Failed to load faster-whisper ROCm/HIP model" in str(exc)
+    else:
+        raise AssertionError("Expected ROCm initialization failure")
 
 
 def test_create_transcriber_selects_openai_realtime_backend(monkeypatch):
@@ -152,6 +249,7 @@ def test_openai_whisper_transcriber_uses_transcriptions_api(monkeypatch, tmp_pat
     assert translation_calls == []
     assert result.transcription_backend == "openai-whisper"
     assert result.model_name == "whisper-1"
+    assert result.accelerator == "openai"
     assert result.full_text == "Hola mundo"
     assert len(result.segments) == 2
 
@@ -201,6 +299,48 @@ def test_openai_whisper_transcriber_uses_translations_api_for_translate(monkeypa
     assert "language" not in translation_calls[0]
     assert result.full_text == "Hello world"
     assert result.segments[0].text == "Hello world"
+
+
+def test_openai_whisper_transcriber_rejects_oversized_audio_before_api_call(
+    monkeypatch,
+    tmp_path,
+):
+    class _FakeOpenAI:
+        def __init__(self, _api_key):
+            raise AssertionError("OpenAI client should not be created for oversized files")
+
+    monkeypatch.setitem(sys.modules, "openai", SimpleNamespace(OpenAI=_FakeOpenAI))
+
+    audio_path = tmp_path / "too-large.mp3"
+    with audio_path.open("wb") as audio_file:
+        audio_file.truncate(OPENAI_MAX_FILE_SIZE_BYTES + 1)
+    settings = Settings(
+        transcription_backend="openai-whisper",
+        openai_api_key="sk_test_key",
+    )
+
+    try:
+        OpenAIWhisperTranscriber(settings).transcribe_file(audio_path)
+    except ValueError as exc:
+        assert "exceeds the OpenAI Audio API limit of 25 MB" in str(exc)
+    else:
+        raise AssertionError("Expected oversized OpenAI audio file to be rejected")
+
+
+def test_openai_error_message_maps_common_api_failures():
+    class _OpenAIError(Exception):
+        def __init__(self, status_code=None):
+            super().__init__("api failed")
+            self.status_code = status_code
+
+    _OpenAIError.__name__ = "RateLimitError"
+    assert "rate limit exceeded" in _openai_error_message(_OpenAIError(429))
+
+    auth_error = type("AuthenticationError", (Exception,), {})("bad key")
+    assert "invalid API key" in _openai_error_message(auth_error)
+
+    timeout_error = type("APITimeoutError", (Exception,), {})("timeout")
+    assert "request timed out" in _openai_error_message(timeout_error)
 
 
 def test_openai_realtime_transcriber_sends_session_and_audio(monkeypatch, tmp_path):
@@ -275,4 +415,5 @@ def test_openai_realtime_transcriber_sends_session_and_audio(monkeypatch, tmp_pa
     assert sent_events[2]["type"] == "input_audio_buffer.commit"
     assert result.transcription_backend == "openai-realtime-whisper"
     assert result.model_name == "gpt-realtime-whisper"
+    assert result.accelerator == "openai"
     assert result.full_text == "Hola mundo"

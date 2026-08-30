@@ -56,7 +56,7 @@ def _metadata_matches_settings(metadata: dict, settings: Settings) -> bool:
         expected_variants.append(fallback_settings)
 
     for candidate in expected_variants:
-        if all(
+        if _accelerator_matches(metadata, candidate) and all(
             metadata.get(metadata_key) == getattr(candidate, settings_attr)
             for metadata_key, settings_attr in CONFIG_FIELDS.items()
         ):
@@ -92,15 +92,36 @@ def _openai_realtime_metadata_matches_settings(metadata: dict, settings: Setting
 
 
 def _cpu_fallback_variant(settings: Settings) -> Settings | None:
-    if settings.whisper_device != "cuda" or not settings.whisper_allow_cpu_fallback:
+    if settings.effective_whisper_device != "cuda" or not settings.whisper_allow_cpu_fallback:
         return None
     return settings.model_copy(
         update={
+            "whisper_accelerator": "cpu",
             "whisper_device": "cpu",
             "whisper_compute_type": "int8",
             "whisper_batch_size": 1,
         }
     )
+
+
+def _accelerator_matches(metadata: dict, settings: Settings) -> bool:
+    requested = metadata.get("requested_accelerator")
+    runtime = metadata.get("accelerator")
+    recorded = requested or runtime
+    if requested == "auto" and runtime == settings.runtime_accelerator_label:
+        return True
+    if recorded is None:
+        recorded_device = metadata.get("device") or metadata.get("requested_device")
+        if settings.whisper_accelerator == "auto":
+            return recorded_device in {"cuda", "cpu"}
+        if settings.whisper_accelerator == "cuda":
+            return recorded_device == "cuda" and settings.whisper_device == "cuda"
+        if settings.whisper_accelerator == "cpu":
+            return recorded_device == "cpu" and settings.whisper_device == "cpu"
+        return False
+    if recorded == settings.whisper_accelerator:
+        return True
+    return settings.whisper_accelerator == "auto" and recorded in {"cuda", "cpu"}
 
 
 def _find_metadata_path(output_dir: Path, source_sha256: str) -> Path:

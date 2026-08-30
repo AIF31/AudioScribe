@@ -4,9 +4,9 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+from audio_transcriber.accelerator_check import AcceleratorCheckResult, check_accelerator
 from audio_transcriber.audio import discover_media_files
 from audio_transcriber.config import Settings, get_settings
-from audio_transcriber.cuda_check import check_cuda
 from audio_transcriber.diarizer import (
     assign_speakers,
     export_diarized,
@@ -37,23 +37,18 @@ def inspect_config() -> None:
 
 @app.command("check-cuda")
 def check_cuda_command() -> None:
+    settings = get_settings().model_copy(
+        update={"whisper_accelerator": "cuda", "whisper_device": "cuda"}
+    )
+    result = check_accelerator(settings)
+    _print_accelerator_check(settings, result)
+
+
+@app.command("check-accelerator")
+def check_accelerator_command() -> None:
     settings = get_settings()
-    console.print(f"Configured device: {settings.whisper_device}")
-    console.print(f"Configured compute type: {settings.whisper_compute_type}")
-    result = check_cuda()
-
-    if result.nvidia_smi_found:
-        console.print("[green]nvidia-smi is available.[/green]")
-    else:
-        console.print("[red]nvidia-smi is not available or failed.[/red]")
-
-    if result.faster_whisper_cuda_ok:
-        console.print("[green]faster-whisper loaded a tiny CUDA model successfully.[/green]")
-    else:
-        console.print("[red]faster-whisper CUDA check failed.[/red]")
-        if result.error:
-            console.print(result.error)
-        raise typer.Exit(code=1)
+    result = check_accelerator(settings)
+    _print_accelerator_check(settings, result)
 
 
 @app.command("transcribe-file")
@@ -194,6 +189,61 @@ def _transcribe_files(files: list[Path], output_root: Path, settings: Settings) 
         )
 
     console.print(table)
+
+
+def _print_accelerator_check(
+    settings: Settings,
+    result: AcceleratorCheckResult,
+) -> None:
+    console.print(f"Configured accelerator: {settings.runtime_accelerator_label}")
+    console.print(f"Configured CTranslate2 device: {settings.effective_whisper_device}")
+    console.print(f"Configured compute type: {settings.whisper_compute_type}")
+
+    if result.ctranslate2_version:
+        console.print(f"CTranslate2 version: {result.ctranslate2_version}")
+
+    if result.ctranslate2_gpu_count is not None:
+        console.print(f"CTranslate2 GPU device count: {result.ctranslate2_gpu_count}")
+
+    for check in result.system_checks:
+        if check.ok:
+            console.print(f"{check.name}: [green]ok[/green]")
+        elif check.found:
+            console.print(f"{check.name}: [yellow]failed[/yellow]")
+        else:
+            console.print(f"{check.name}: [yellow]missing[/yellow]")
+
+    if settings.runtime_accelerator_label == "rocm":
+        _print_rocm_diagnostics(result)
+
+    if result.faster_whisper_gpu_ok:
+        console.print("[green]faster-whisper loaded a tiny GPU model successfully.[/green]")
+        return
+
+    if settings.runtime_accelerator_label == "cpu":
+        console.print("[yellow]CPU mode selected; GPU model check skipped.[/yellow]")
+        return
+
+    console.print("[red]faster-whisper GPU check failed.[/red]")
+    if result.error:
+        console.print(result.error)
+    raise typer.Exit(code=1)
+
+
+def _print_rocm_diagnostics(result: AcceleratorCheckResult) -> None:
+    any_tool_found = any(check.found for check in result.system_checks)
+    if not any_tool_found:
+        console.print(
+            "[yellow]No ROCm/HIP diagnostic tools were found on PATH. "
+            "On Windows, run from a PowerShell environment with AMD HIP SDK paths loaded; "
+            "inside WSL, confirm the AMD GPU is exposed to Linux.[/yellow]"
+        )
+    if result.ctranslate2_gpu_count == 0:
+        console.print(
+            "[yellow]CTranslate2 reports zero GPU devices. ROCm GPU transcription will not "
+            "run until the HIP/ROCm runtime and a ROCm-enabled CTranslate2 wheel or build "
+            "can see the AMD GPU.[/yellow]"
+        )
 
 
 if __name__ == "__main__":

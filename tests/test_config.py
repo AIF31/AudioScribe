@@ -7,6 +7,7 @@ def test_default_settings_are_cuda_first(monkeypatch):
     for key in [
         "TRANSCRIPTION_BACKEND",
         "WHISPER_MODEL_NAME",
+        "WHISPER_ACCELERATOR",
         "WHISPER_DEVICE",
         "WHISPER_COMPUTE_TYPE",
         "WHISPER_LANGUAGE",
@@ -25,7 +26,10 @@ def test_default_settings_are_cuda_first(monkeypatch):
 
     assert settings.transcription_backend == "faster-whisper"
     assert settings.whisper_model_name == "large-v3"
+    assert settings.whisper_accelerator == "auto"
     assert settings.whisper_device == "cuda"
+    assert settings.effective_whisper_device == "cuda"
+    assert settings.runtime_accelerator_label == "cuda"
     assert settings.whisper_compute_type == "float16"
     assert settings.whisper_language is None
     assert settings.whisper_batch_size == 8
@@ -72,6 +76,7 @@ def test_path_env_vars(monkeypatch):
 
 def test_cpu_fallback_settings(monkeypatch):
     monkeypatch.setenv("WHISPER_MODEL_NAME", "medium")
+    monkeypatch.setenv("WHISPER_ACCELERATOR", "cpu")
     monkeypatch.setenv("WHISPER_DEVICE", "cpu")
     monkeypatch.setenv("WHISPER_COMPUTE_TYPE", "int8")
     monkeypatch.setenv("WHISPER_BATCH_SIZE", "1")
@@ -79,7 +84,9 @@ def test_cpu_fallback_settings(monkeypatch):
     settings = Settings()
 
     assert settings.whisper_model_name == "medium"
+    assert settings.whisper_accelerator == "cpu"
     assert settings.whisper_device == "cpu"
+    assert settings.effective_whisper_device == "cpu"
     assert settings.whisper_compute_type == "int8"
     assert settings.whisper_batch_size == 1
 
@@ -116,6 +123,19 @@ def test_openai_whisper_backend_loads_from_env(monkeypatch):
     assert settings.openai_whisper_model == "whisper-1"
 
 
+def test_openai_whisper_allows_unused_local_accelerator_mismatch(monkeypatch):
+    monkeypatch.setenv("TRANSCRIPTION_BACKEND", "openai-whisper")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk_test_key")
+    monkeypatch.setenv("WHISPER_ACCELERATOR", "cpu")
+    monkeypatch.setenv("WHISPER_DEVICE", "cuda")
+
+    settings = Settings()
+
+    assert settings.transcription_backend == "openai-whisper"
+    assert settings.whisper_accelerator == "cpu"
+    assert settings.whisper_device == "cuda"
+
+
 def test_openai_realtime_backend_loads_from_env(monkeypatch):
     monkeypatch.setenv("TRANSCRIPTION_BACKEND", "openai-realtime-whisper")
     monkeypatch.setenv("OPENAI_API_KEY", "sk_test_key")
@@ -126,3 +146,54 @@ def test_openai_realtime_backend_loads_from_env(monkeypatch):
     assert settings.transcription_backend == "openai-realtime-whisper"
     assert settings.openai_api_key == "sk_test_key"
     assert settings.openai_realtime_model == "gpt-realtime-whisper"
+
+
+def test_openai_realtime_allows_unused_local_accelerator_mismatch(monkeypatch):
+    monkeypatch.setenv("TRANSCRIPTION_BACKEND", "openai-realtime-whisper")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk_test_key")
+    monkeypatch.setenv("WHISPER_ACCELERATOR", "rocm")
+    monkeypatch.setenv("WHISPER_DEVICE", "cpu")
+
+    settings = Settings()
+
+    assert settings.transcription_backend == "openai-realtime-whisper"
+    assert settings.whisper_accelerator == "rocm"
+    assert settings.whisper_device == "cpu"
+
+
+def test_rocm_settings_require_cuda_device(monkeypatch):
+    monkeypatch.setenv("TRANSCRIPTION_BACKEND", "faster-whisper")
+    monkeypatch.setenv("WHISPER_ACCELERATOR", "rocm")
+    monkeypatch.setenv("WHISPER_DEVICE", "cuda")
+
+    settings = Settings()
+
+    assert settings.whisper_accelerator == "rocm"
+    assert settings.effective_whisper_device == "cuda"
+    assert settings.runtime_accelerator_label == "rocm"
+
+
+def test_rocm_rejects_non_cuda_device(monkeypatch):
+    monkeypatch.setenv("TRANSCRIPTION_BACKEND", "faster-whisper")
+    monkeypatch.setenv("WHISPER_ACCELERATOR", "rocm")
+    monkeypatch.setenv("WHISPER_DEVICE", "cpu")
+
+    try:
+        Settings()
+    except ValueError as exc:
+        assert "requires WHISPER_DEVICE=cuda" in str(exc)
+    else:
+        raise AssertionError("Expected invalid ROCm/device combination to fail")
+
+
+def test_cpu_accelerator_requires_cpu_device(monkeypatch):
+    monkeypatch.setenv("TRANSCRIPTION_BACKEND", "faster-whisper")
+    monkeypatch.setenv("WHISPER_ACCELERATOR", "cpu")
+    monkeypatch.setenv("WHISPER_DEVICE", "cuda")
+
+    try:
+        Settings()
+    except ValueError as exc:
+        assert "WHISPER_ACCELERATOR=cpu requires WHISPER_DEVICE=cpu" in str(exc)
+    else:
+        raise AssertionError("Expected invalid CPU/device combination to fail")

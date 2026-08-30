@@ -20,6 +20,7 @@ def sample_result() -> TranscriptResult:
         language_probability=0.99,
         duration=65.4,
         model_name="large-v3",
+        accelerator="cuda",
         device="cuda",
         compute_type="float16",
         batch_size=8,
@@ -46,6 +47,7 @@ def test_export_md(tmp_path):
     assert "- Backend: faster-whisper" in text
     assert "[00:00:00 - 00:00:04]" in text
     assert "Hola." in text
+    assert "- Accelerator: cuda" in text
     assert "- Device: cuda" in text
 
 
@@ -62,10 +64,13 @@ def test_export_metadata(tmp_path):
     assert metadata["source_sha256"] == "abc123"
     assert metadata["transcription_backend"] == "faster-whisper"
     assert metadata["model_name"] == "large-v3"
+    assert metadata["accelerator"] == "cuda"
     assert metadata["device"] == "cuda"
     assert metadata["compute_type"] == "float16"
     assert metadata["batch_size"] == 8
     assert metadata["requested_device"] == "cuda"
+    assert metadata["requested_accelerator"] == "auto"
+    assert metadata["effective_device"] == "cuda"
     assert metadata["requested_compute_type"] == "float16"
     assert metadata["requested_batch_size"] == 8
     assert metadata["openai_whisper_model"] == "whisper-1"
