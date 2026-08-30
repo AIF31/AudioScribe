@@ -7,7 +7,7 @@ description: Transcribe audio or video files with this transcription project usi
 
 ## Overview
 
-Use this repository to transcribe audio and video files. The default backend is local `SYSTRAN/faster-whisper`; the project also supports OpenAI cloud file transcription with `TRANSCRIPTION_BACKEND=openai-whisper` and an `OPENAI_API_KEY` in `.env`. Outputs are Markdown transcript files plus metadata JSON, named from the original media stem. CUDA runs must be executed outside the sandbox because sandboxed sessions can block GPU access and surface misleading CUDA initialization errors.
+Use this repository to transcribe audio and video files. The default backend is local faster-whisper (default model `large-v3-turbo`, configurable via `WHISPER_MODEL_NAME` in `.env`); the project also supports OpenAI cloud file transcription with `TRANSCRIPTION_BACKEND=openai-whisper` and an `OPENAI_API_KEY` in `.env`. Outputs are Markdown transcript files plus metadata JSON, named from the original media stem. CUDA runs must be executed outside the sandbox because sandboxed sessions can block GPU access and surface misleading CUDA initialization errors.
 
 ## Workflow
 
@@ -61,5 +61,5 @@ TRANSCRIPTION_BACKEND=openai-whisper OPENAI_WHISPER_MODEL=whisper-1 audio-transc
 - If OpenAI cloud transcription fails with authentication errors, confirm `.env` contains a valid `OPENAI_API_KEY` and that the key has access to the Audio Transcriptions API.
 - If CUDA library loading fails in a sandboxed session, rerun the same CUDA command outside the sandbox before assuming the host driver is broken.
 - If CUDA library loading fails outside the sandbox, ensure the virtualenv is active and `source scripts/setup_cuda_env.sh` ran.
-- If CUDA memory fails, use `.env.cuda.low-vram.example` settings or set `WHISPER_BATCH_SIZE=4` and `WHISPER_COMPUTE_TYPE=int8_float16`.
+- If CUDA memory fails, first lower `WHISPER_BATCH_SIZE` (8 → 4 → 1). With the default `large-v3-turbo` model, `WHISPER_COMPUTE_TYPE=float16` and `WHISPER_BATCH_SIZE=8` fit comfortably in 8 GB VRAM; if you switch back to `large-v3`, use `WHISPER_COMPUTE_TYPE=int8_float16` and `WHISPER_BATCH_SIZE=4` (see `.env.cuda.low-vram.example`).
 - If the user wants CPU fallback, copy `.env.cpu.example` to `.env` or set `WHISPER_DEVICE=cpu`, `WHISPER_COMPUTE_TYPE=int8`, and `WHISPER_BATCH_SIZE=1`.
