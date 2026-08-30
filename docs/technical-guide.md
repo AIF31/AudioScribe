@@ -152,14 +152,14 @@ CPU fallback:
 cp .env.cpu.example .env
 ```
 
-Set language when you know it:
+Language is detected automatically by default:
 
 ```env
-WHISPER_LANGUAGE=en
+WHISPER_LANGUAGE=auto
 WHISPER_TASK=transcribe
 ```
 
-Use `WHISPER_LANGUAGE=auto` only if your workflow is updated to support automatic language detection consistently.
+Set `WHISPER_LANGUAGE` to an explicit language code (for example `en` or `es`) when you know it and want to skip detection. `auto` (or leaving it empty) passes no language to faster-whisper, which detects it from the audio and records the result in the transcript metadata as `detected_language`.
 
 ## Quality Review
 

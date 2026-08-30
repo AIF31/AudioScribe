@@ -159,7 +159,7 @@ class OpenAIWhisperTranscriber:
             "model": self.settings.openai_whisper_model,
             "response_format": "verbose_json",
         }
-        if task == "transcribe":
+        if task == "transcribe" and self.settings.whisper_language:
             kwargs["language"] = self.settings.whisper_language
         if self.settings.whisper_initial_prompt:
             kwargs["prompt"] = self.settings.whisper_initial_prompt
@@ -322,7 +322,11 @@ class OpenAIRealtimeWhisperTranscriber:
                         },
                         "transcription": {
                             "model": self.settings.openai_realtime_model,
-                            "language": self.settings.whisper_language,
+                            **(
+                                {"language": self.settings.whisper_language}
+                                if self.settings.whisper_language
+                                else {}
+                            ),
                         },
                         "turn_detection": turn_detection,
                         "noise_reduction": noise_reduction,
