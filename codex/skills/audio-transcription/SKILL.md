@@ -7,7 +7,7 @@ description: Transcribe audio or video files with this transcription project usi
 
 ## Overview
 
-Use this repository to transcribe audio and video files. The default backend is local faster-whisper (default model `large-v3-turbo`, configurable via `WHISPER_MODEL_NAME` in `.env`); the project also supports OpenAI cloud file transcription with `TRANSCRIPTION_BACKEND=openai-whisper` and an `OPENAI_API_KEY` in `.env`. Outputs are Markdown transcript files plus metadata JSON, named from the original media stem. CUDA and ROCm/HIP runs must be executed outside the sandbox because sandboxed sessions can block GPU access and surface misleading initialization errors.
+Use this repository to transcribe audio and video files. The default backend is local faster-whisper (default model `large-v3`; the faster, lighter `large-v3-turbo` is available via `WHISPER_MODEL_NAME` in `.env`); the project also supports OpenAI cloud file transcription with `TRANSCRIPTION_BACKEND=openai-whisper` and an `OPENAI_API_KEY` in `.env`. Outputs are Markdown transcript files plus metadata JSON, named from the original media stem. CUDA and ROCm/HIP runs must be executed outside the sandbox because sandboxed sessions can block GPU access and surface misleading initialization errors.
 
 ## Workflow
 
@@ -64,7 +64,7 @@ TRANSCRIPTION_BACKEND=openai-whisper OPENAI_WHISPER_MODEL=whisper-1 audio-transc
 - If OpenAI cloud transcription fails with authentication errors, confirm `.env` contains a valid `OPENAI_API_KEY` and that the key has access to the Audio Transcriptions API.
 - If CUDA library loading fails in a sandboxed session, rerun the same CUDA command outside the sandbox before assuming the host driver is broken.
 - If CUDA library loading fails outside the sandbox, ensure the virtualenv is active and `source scripts/setup_cuda_env.sh` ran.
-- If CUDA memory fails, first lower `WHISPER_BATCH_SIZE` (8 → 4 → 1). With the default `large-v3-turbo` model, `WHISPER_COMPUTE_TYPE=float16` and `WHISPER_BATCH_SIZE=8` fit comfortably in 8 GB VRAM; if you switch back to `large-v3`, use `WHISPER_COMPUTE_TYPE=int8_float16` and `WHISPER_BATCH_SIZE=4` (see `.env.cuda.low-vram.example`).
+- If CUDA memory fails, first lower `WHISPER_BATCH_SIZE` (8 → 4 → 1). On 8 GB GPUs, `large-v3` with `WHISPER_COMPUTE_TYPE=float16` and `WHISPER_BATCH_SIZE=8` was verified at ~5.9 GB VRAM but has little headroom; if OOM appears, use `WHISPER_COMPUTE_TYPE=int8_float16` and `WHISPER_BATCH_SIZE=4` (see `.env.cuda.low-vram.example`). `large-v3-turbo` runs comfortably at float16/batch 8 (~4 GB VRAM).
 - If the user wants CPU fallback, copy `.env.cpu.example` to `.env` or set `WHISPER_DEVICE=cpu`, `WHISPER_COMPUTE_TYPE=int8`, and `WHISPER_BATCH_SIZE=1`.
 - CPU transcription is significantly slower than CUDA and is only recommended for short or small files. Large recordings may take hours.
 - If OpenAI cloud transcription fails with a 413 error, the file exceeds the 25 MB upload limit. Use the `faster-whisper` backend or split the media.

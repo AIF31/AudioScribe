@@ -172,6 +172,31 @@ If `accelerator` is `cpu`, the run used CPU fallback instead of the AMD GPU.
 
 ## Model Settings
 
+### Model choice: `large-v3` (default) vs `large-v3-turbo` (fast option)
+
+Both models were benchmarked on the same 45:57 recording on an RTX 4070 Ti 8 GB
+(`scripts/compare_models.py`, outputs under `data/comparison/`). Measured trade-offs:
+
+| | `large-v3` (default) | `large-v3-turbo` |
+| --- | --- | --- |
+| Wall time (46 min audio, batch 8, float16) | 119 s (~23x realtime) | **55 s (~50x realtime)** |
+| Peak VRAM | ~5.9 GB (little headroom) | **~4 GB** |
+| Auto language detection | en (0.997) | en (1.000) |
+| Segment boundaries (VAD) | identical (102 segments) | identical (102 segments) |
+
+Disclaimers when choosing `large-v3-turbo`:
+
+- Word-level agreement between the models is ~93% after normalizing case and
+  punctuation (10.2% of words differ on the test recording); no ground truth was
+  used, so this measures variability, not accuracy against reality.
+- Turbo transcribes more **verbatim**: it keeps stutters and self-repetitions
+  that large-v3 cleans up. Pick large-v3 if you prefer readable prose; pick
+  turbo if you need a verbatim record.
+- Turbo's batched pipeline can produce occasional segments **without punctuation
+  or capitalization** — relevant if downstream tools parse punctuation.
+- Single-word ambiguities (homophones) differ between models in both directions;
+  spot-check critical terms against the audio.
+
 Default CUDA quality mode:
 
 ```env
